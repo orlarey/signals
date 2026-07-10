@@ -1,0 +1,880 @@
+/************************************************************************
+ ************************************************************************
+    FAUST compiler
+    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
+    ---------------------------------------------------------------------
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation; either version 2.1 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ ************************************************************************
+ ************************************************************************/
+
+#include "ppsig.hh"
+#include <vector>
+#include "sigs-config.hh"
+#include "binop.hh"
+#include "tlib-error.hh"
+#include "sigs-state.hh"
+#include "prim2.hh"
+#include "recursiveness.hh"
+#include "xtended.hh"
+
+using namespace std;
+
+ppsig::ppsig(Tree s, int max_size)
+    : fSig(s), fEnv(::nil()), fPriority(0), fHideRecursion(false), fMaxSize(max_size)
+{
+}
+
+ostream& ppsig::printinfix(ostream& fout, const string& opname, int priority, Tree x, Tree y) const
+{
+#if 0
+    if (fPriority > priority) {
+        fout << "(";
+    }
+    fout << ppsig(x, fEnv, priority, fMaxSize - 1) << opname << ppsig(y, fEnv, priority, fMaxSize - 1);
+    if (fPriority > priority) {
+        fout << ")";
+    }
+    return fout;
+#endif
+    return printfun(fout, opname, x, y);
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x) const
+{
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y) const
+{
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(y, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z) const
+{
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(y, fEnv, 0, fMaxSize - 1) << ',' << ppsig(z, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z, Tree zz) const
+{
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(y, fEnv, 0, fMaxSize - 1) << ',' << ppsig(z, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(zz, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z, Tree z2,
+                         Tree z3) const
+{
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(y, fEnv, 0, fMaxSize - 1) << ',' << ppsig(z, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(z2, fEnv, 0, fMaxSize - 1) << ',' << ppsig(z3, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printfun(ostream& fout, const string& funame, const tvec& args) const
+{
+    fout << funame;
+    char sep = '(';
+    for (auto arg : args) {
+        fout << sep << ppsig(arg, fEnv, 0, fMaxSize - 1);
+        sep = ',';
+    }
+    return fout << ")";
+}
+
+ostream& ppsig::printfir(ostream& fout, const tvec& args) const
+{
+    fout << "FIR";
+    std::string sep = "[";
+    for (auto arg : args) {
+        int  p;
+        Tree g, vaaar, le;
+
+        if (isProj(arg, &p, g) && isRec(g, vaaar, le)) {
+            fout << sep << ' ' << *vaaar << '_' << p;
+        } else {
+            fout << sep << ppsig(arg, fEnv, 0, fMaxSize - 1);
+        }
+        sep = "; ";
+    }
+    return fout << "]";
+}
+
+ostream& ppsig::printiir(ostream& fout, const tvec& args) const
+{
+    fout << "IIR";
+    std::string sep = "[";
+    int         p;
+    Tree        g, vaaar, le;
+    for (auto arg : args) {
+        if (isProj(arg, &p, g) && isRec(g, vaaar, le)) {
+            fout << sep << ' ' << *vaaar << '_' << p;
+        } else if (isNil(arg)) {
+            fout << sep << "VOID";
+        } else {
+            fout << sep << ppsig(arg, fEnv, 0, fMaxSize - 1);
+        }
+        sep = "; ";
+    }
+    return fout << "]";
+}
+
+ostream& ppsig::printui(ostream& fout, const string& funame, Tree label) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ')';
+}
+
+ostream& ppsig::printui(ostream& fout, const string& funame, Tree label, Tree lo, Tree hi,
+                        Tree step) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ',' << ppsig(lo, fEnv, 0, fMaxSize - 1) << ',' << ppsig(hi, fEnv, 0, fMaxSize - 1) << ','
+                << ppsig(step, fEnv, 0, fMaxSize - 1) << ')';
+}
+
+ostream& ppsig::printui(ostream& fout, const string& funame, Tree label, Tree cur, Tree lo, Tree hi,
+                        Tree step) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ',' << ppsig(cur, fEnv, 0, fMaxSize - 1) << ',' << ppsig(lo, fEnv, 0, fMaxSize - 1)
+                << ',' << ppsig(hi, fEnv, 0, fMaxSize - 1) << ',' << ppsig(step, fEnv, 0, fMaxSize - 1)
+                << ')';
+}
+
+ostream& ppsig::printout(ostream& fout, int i, Tree x) const
+{
+    if (fPriority > 0) {
+        fout << "(";
+    }
+    fout << "OUT" << i << " = " << ppsig(x, fEnv, 0, fMaxSize - 1);
+    if (fPriority > 0) {
+        fout << ")";
+    }
+    return fout;
+}
+
+ostream& ppsig::printlabel(ostream& fout, Tree pathname) const
+{
+    fout << '"' << *hd(pathname);
+    pathname = tl(pathname);
+    while (!isNil(pathname)) {
+        fout << '/' << *tl(hd(pathname));
+        pathname = tl(pathname);
+    }
+    fout << '"';
+    return fout;
+}
+
+ostream& ppsig::printlist(ostream& fout, Tree largs) const
+{
+    string sep = "";
+    fout << '(';
+    while (!isNil(largs)) {
+        fout << sep << ppsig(hd(largs), fEnv, 0, fMaxSize - 1);
+        sep   = ", ";
+        largs = tl(largs);
+    }
+    fout << ')';
+    return fout;
+}
+
+ostream& ppsig::printff(ostream& fout, Tree ff, Tree largs) const
+{
+    fout << ffname(ff);
+    printlist(fout, largs);
+    return fout;
+}
+
+ostream& ppsig::printDelay(ostream& fout, Tree exp, Tree delay) const
+{
+    // int d;
+
+    // if (isSigInt(delay, &d) && (d == 1)) {
+    //     fout << ppsig(exp, fEnv, 8, fMaxSize - 1) << "'";
+    // } else {
+    //     printinfix(fout, "@", 8, exp, delay);
+    // }
+    printfun(fout, "Delay", exp, delay);
+    return fout;
+}
+
+ostream& ppsig::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
+{
+    if (isElement(var, fEnv)) {
+        fout << *var;
+    } else if (hide) {
+        fout << *var;
+    } else {
+        stringstream str_rec;
+        str_rec << ppsig(lexp, addElement(var, fEnv), 0, fMaxSize - 1);
+        if (str_rec.tellp() == 0) {
+            fout << "letrec(" << *var << " = ...)";
+        } else {
+            fout << "letrec(" << *var << " = " << str_rec.str() << ")";
+        }
+    }
+    return fout;
+}
+
+ostream& ppsig::printrec(ostream& fout, Tree lexp, bool hide) const
+{
+    stringstream str_rec;
+    str_rec << ppsig(lexp, fEnv, 0, fMaxSize - 1);
+    if (str_rec.tellp() == 0) {
+        fout << "debruijn(...)";
+    } else {
+        fout << "debruijn(" << str_rec.str() << ")";
+    }
+    return fout;
+}
+
+ostream& ppsig::printextended(ostream& fout, Tree sig1) const
+{
+    string   sep = "";
+    xtended* p   = (xtended*)getUserData(fSig);
+
+    fout << p->name() << '(';
+    for (int i = 0; i < sig1->arity(); i++) {
+        fout << sep << ppsig(sig1->branch(i), fEnv, 0, fMaxSize - 1);
+        sep = ", ";
+    }
+    fout << ')';
+    return fout;
+}
+
+ostream& ppsig::print(ostream& fout) const
+{
+    // Stops printing when maximum depth is reached
+    // fMaxSize now represents recursion depth, not character count
+    if (fMaxSize <= 0) {
+        fout << fSig;  // Print signal address
+        return fout;
+    }
+
+    int    i;
+    double r;
+    Tree   c, sel, w, x, y, z, u, var, le, label, ff, largs, type, name, file, sf;
+
+    if (isList(fSig)) {
+        printlist(fout, fSig);
+    } else if (isProj(fSig, &i, x)) {
+        fout << "proj" << i << '(' << ppsig(x, fEnv, 0, fMaxSize - 1) << ')';
+    } else if (isRec(fSig, var, le)) {
+        printrec(fout, var, le, fHideRecursion /*&& (getRecursiveness(sig)==0)*/);
+    }
+
+    // debruinj notation
+    else if (isRec(fSig, le)) {
+        printrec(fout, le, fHideRecursion);
+    } else if (isRef(fSig, i)) {
+        fout << "REF[" << i << "]";
+    }
+
+    else if (getUserData(fSig)) {
+        printextended(fout, fSig);
+    } else if (isSigInt(fSig, &i)) {
+        fout << i;
+    } else if (isSigReal(fSig, &r)) {
+        fout << sigs::printReal(r);
+    } else if (isSigWaveform(fSig)) {
+        fout << "waveform{...}";
+    } else if (isSigInput(fSig, &i)) {
+        fout << "IN[" << i << "]";
+    } else if (isSigOutput(fSig, &i, x)) {
+        printout(fout, i, x);
+    }
+
+    else if (isSigDelay1(fSig, x)) {
+        printDelay(fout, x, sigInt(1));
+    } else if (isSigDelay(fSig, x, y)) {
+        printDelay(fout, x, y);
+    } else if (isSigPrefix(fSig, x, y)) {
+        printfun(fout, "prefix", x, y);
+    } else if (isSigBinOp(fSig, &i, x, y)) {
+        printinfix(fout, gBinOpTable[i]->fName, gBinOpTable[i]->fPriority, x, y);
+    } else if (isSigFFun(fSig, ff, largs)) {
+        printff(fout, ff, largs);
+    } else if (isSigFConst(fSig, type, name, file)) {
+        fout << tree2str(name);
+    } else if (isSigFVar(fSig, type, name, file)) {
+        fout << tree2str(name);
+    }
+
+    if (isSigWRTbl(fSig, w, x, y, z)) {
+        if (y == ::nil()) {
+            // rtable
+            printfun(fout, "WRTbl2p", w, x);
+        } else {
+            // rwtable
+            fout << "sigWRTbl4p(" << ppsig(w, fEnv, 0, fMaxSize - 1);
+            fout << "; " << ppsig(x, fEnv, 0, fMaxSize - 1);
+            fout << "; " << ppsig(y, fEnv, 0, fMaxSize - 1);
+            fout << "; " << ppsig(z, fEnv, 0, fMaxSize - 1) << " )";
+        }
+    } else if (isSigRDTbl(fSig, x, y)) {
+        printfun(fout, "sigRDTbl", x, y);
+    } else if (isSigGen(fSig, x)) {
+        fout << "sigGen(" << ppsig(x, fEnv, fPriority, fMaxSize - 1) << ")";
+    }
+
+    else if (isSigDocConstantTbl(fSig, x, y)) {
+        printfun(fout, "docConstantTbl", x, y);
+    } else if (isSigDocWriteTbl(fSig, x, y, z, u)) {
+        printfun(fout, "docWriteTbl", x, y, z, u);
+    } else if (isSigDocAccessTbl(fSig, x, y)) {
+        printfun(fout, "docAccessTbl", x, y);
+    }
+
+    else if (isSigSelect2(fSig, sel, x, y)) {
+        printfun(fout, "select2", sel, x, y);
+    }
+
+    else if (isSigIntCast(fSig, x)) {
+        printfun(fout, "int", x);
+    } else if (isSigBitCast(fSig, x)) {
+        printfun(fout, "bit", x);
+    } else if (isSigFloatCast(fSig, x)) {
+        printfun(fout, "float", x);
+    }
+
+    else if (isSigButton(fSig, label)) {
+        printui(fout, "button", label);
+    } else if (isSigCheckbox(fSig, label)) {
+        printui(fout, "checkbox", label);
+    } else if (isSigVSlider(fSig, label, c, x, y, z)) {
+        printui(fout, "vslider", label, c, x, y, z);
+    } else if (isSigHSlider(fSig, label, c, x, y, z)) {
+        printui(fout, "hslider", label, c, x, y, z);
+    } else if (isSigNumEntry(fSig, label, c, x, y, z)) {
+        printui(fout, "nentry", label, c, x, y, z);
+    } else if (isSigVBargraph(fSig, label, x, y, z)) {
+        printui(fout, "vbargraph", label, x, y, z);
+    } else if (isSigHBargraph(fSig, label, x, y, z)) {
+        printui(fout, "hbargraph", label, x, y, z);
+    }
+
+    else if (isSigSoundfile(fSig, label)) {
+        printui(fout, "soundfile", label);
+    } else if (isSigSoundfileLength(fSig, sf, x)) {
+        printfun(fout, "length", sf, x);
+    } else if (isSigSoundfileRate(fSig, sf, x)) {
+        printfun(fout, "rate", sf, x);
+    } else if (isSigSoundfileBuffer(fSig, sf, x, y, z)) {
+        printfun(fout, "buffer", sf, x, y, z);
+    }
+
+    else if (isSigFIR(fSig)) {
+        printfir(fout, fSig->branches());
+    } else if (isSigIIR(fSig)) {
+        printiir(fout, fSig->branches());
+    } else if (isSigSum(fSig)) {
+        printfun(fout, "sum", fSig->branches());
+    }
+
+    else if (isSigTempVar(fSig, x)) {
+        printfun(fout, "tempvar", x);
+    } else if (isSigPermVar(fSig, x)) {
+        printfun(fout, "permvar", x);
+    } else if (isSigZeroPad(fSig, x, y)) {
+        printfun(fout, "zeropad", x, y);
+    } else if (isSigSeq(fSig, x, y)) {
+        printfun(fout, "seq", x, y);
+    } else if (isSigOD(fSig)) {
+        printfun(fout, "ondemand", fSig->branches());
+    } else if (isSigUS(fSig)) {
+        printfun(fout, "upsampling", fSig->branches());
+    } else if (isSigDS(fSig)) {
+        printfun(fout, "downsampling", fSig->branches());
+    } else if (isSigClocked(fSig, x, y)) {
+        // printfun(fout, "clocked", y);
+        return fout << "clocked" << '(' << x << ", " << ppsig(y, fEnv, 0, fMaxSize - 1) << ')';
+    }
+
+    else if (isSigAttach(fSig, x, y)) {
+        printfun(fout, "attach", x, y);
+    } else if (isSigEnable(fSig, x, y)) {
+        printfun(fout, "enable", x, y);
+    } else if (isSigControl(fSig, x, y)) {
+        printfun(fout, "control", x, y);
+    }
+
+    else if (isSigRegister(fSig, &i, x)) {
+        printfun(fout, "register", sigInt(i), x);
+    }
+
+    else if (isNil(fSig)) {
+        fout << "NIL";
+    }
+
+    else {
+        // cerr << "[[" << *fSig << "]]";
+    }
+    return fout;
+}
+
+#define SIG_INSERT_ID(exp)                                                                        \
+    if (sigs::g.gSignalTable.find(fSig) == sigs::g.gSignalTable.end()) {                        \
+        stringstream s;                                                                           \
+        (exp);                                                                                    \
+        sigs::g.gSignalTable[fSig] = make_pair(sigs::g.gSignalCounter, s.str());                \
+        sigs::g.gSignalTrace.push_back("ID_" + std::to_string(sigs::g.gSignalCounter) + " = " + \
+                                        s.str() + ";\n");                                         \
+        sigs::g.gSignalCounter++;                                                                \
+    }                                                                                             \
+    fout << "ID_" << sigs::g.gSignalTable[fSig].first;
+
+ostream& ppsigShared::printinfix(ostream& fout, const string& opname, int priority, Tree x,
+                                 Tree y) const
+{
+    if (fPriority > priority) {
+        fout << "(";
+    }
+    fout << ppsigShared(x, fEnv, priority) << opname << ppsigShared(y, fEnv, priority);
+    if (fPriority > priority) {
+        fout << ")";
+    }
+    return fout;
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, Tree x) const
+{
+    return fout << funame << '(' << ppsigShared(x, fEnv) << ')';
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, Tree x, Tree y) const
+{
+    return fout << funame << '(' << ppsigShared(x, fEnv) << ',' << ppsigShared(y, fEnv) << ')';
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z) const
+{
+    return fout << funame << '(' << ppsigShared(x, fEnv) << ',' << ppsigShared(y, fEnv) << ','
+                << ppsigShared(z, fEnv) << ')';
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z,
+                               Tree zz) const
+{
+    return fout << funame << '(' << ppsigShared(x, fEnv) << ',' << ppsigShared(y, fEnv) << ','
+                << ppsigShared(z, fEnv) << ',' << ppsigShared(zz, fEnv) << ')';
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z, Tree z2,
+                               Tree z3) const
+{
+    return fout << funame << '(' << ppsigShared(x, fEnv) << ',' << ppsigShared(y, fEnv) << ','
+                << ppsigShared(z, fEnv) << ',' << ppsigShared(z2, fEnv) << ','
+                << ppsigShared(z3, fEnv) << ')';
+}
+
+ostream& ppsigShared::printfun(ostream& fout, const string& funame, const tvec& args) const
+{
+    fout << funame;
+    char sep = '(';
+    for (auto arg : args) {
+        fout << sep << ppsigShared(arg, fEnv);
+        sep = ',';
+    }
+    return fout << ')';
+}
+
+ostream& ppsigShared::printui(ostream& fout, const string& funame, Tree label) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ')';
+}
+
+ostream& ppsigShared::printui(ostream& fout, const string& funame, Tree label, Tree lo, Tree hi,
+                              Tree step) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ',' << ppsigShared(lo, fEnv) << ',' << ppsigShared(hi, fEnv) << ','
+                << ppsigShared(step, fEnv) << ')';
+}
+
+ostream& ppsigShared::printui(ostream& fout, const string& funame, Tree label, Tree cur, Tree lo,
+                              Tree hi, Tree step) const
+{
+    fout << funame << '(';
+    printlabel(fout, label);
+    return fout << ',' << ppsigShared(cur, fEnv) << ',' << ppsigShared(lo, fEnv) << ','
+                << ppsigShared(hi, fEnv) << ',' << ppsigShared(step, fEnv) << ')';
+}
+
+ostream& ppsigShared::printout(ostream& fout, int i, Tree x) const
+{
+    if (fPriority > 0) {
+        fout << '(';
+    }
+    fout << "OUT" << i << " = " << ppsigShared(x, fEnv, 0);
+    if (fPriority > 0) {
+        fout << ')';
+    }
+    return fout;
+}
+
+ostream& ppsigShared::printlist(ostream& fout, Tree largs) const
+{
+    string sep = "";
+    fout << '(';
+    while (!isNil(largs)) {
+        fout << sep << ppsigShared(hd(largs), fEnv);
+        sep   = ", ";
+        largs = tl(largs);
+    }
+    fout << ')';
+    return fout;
+}
+
+ostream& ppsigShared::printff(ostream& fout, Tree ff, Tree largs) const
+{
+    fout << ffname(ff);
+    printlist(fout, largs);
+    return fout;
+}
+
+ostream& ppsigShared::printDelay(ostream& fout, Tree exp, Tree delay) const
+{
+    int d;
+
+    if (isSigInt(delay, &d) && (d == 1)) {
+        fout << ppsigShared(exp, fEnv, 8) << "'";
+    } else {
+        printinfix(fout, "@", 8, exp, delay);
+    }
+    return fout;
+}
+
+ostream& ppsigShared::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
+{
+    if (isElement(var, fEnv)) {
+        fout << *var;
+    } else if (hide) {
+        fout << *var;
+    } else {
+        fout << "letrec(" << *var << " = " << ppsigShared(lexp, addElement(var, fEnv)) << ")";
+    }
+    return fout;
+}
+
+ostream& ppsigShared::printrec(ostream& fout, Tree lexp, bool hide) const
+{
+    fout << "debruijn(" << ppsigShared(lexp, fEnv) << ")";
+    return fout;
+}
+
+ostream& ppsigShared::printextended(ostream& fout, Tree sig1) const
+{
+    string   sep = "";
+    xtended* p   = (xtended*)getUserData(fSig);
+
+    fout << p->name() << '(';
+    for (int i = 0; i < sig1->arity(); i++) {
+        fout << sep << ppsigShared(sig1->branch(i), fEnv);
+        sep = ", ";
+    }
+    fout << ')';
+    return fout;
+}
+
+ostream& ppsigShared::print(ostream& fout) const
+{
+    int    i;
+    double r;
+    Tree   c, sel, w, x, y, z, u, var, le, label, ff, largs, type, name, file, sf;
+
+    if (isList(fSig)) {
+        printlist(fout, fSig);
+    } else if (isProj(fSig, &i, x)) {
+        SIG_INSERT_ID(s << "proj" << i << '(' << ppsigShared(x, fEnv) << ')');
+    } else if (isRec(fSig, var, le)) {
+        SIG_INSERT_ID(printrec(s, var, le, fHideRecursion));
+    }
+
+    // debruinj notation
+    else if (isRec(fSig, le)) {
+        SIG_INSERT_ID(printrec(s, le, fHideRecursion));
+    } else if (isRef(fSig, i)) {
+        fout << "REF[" << i << "]";
+    }
+
+    else if (getUserData(fSig)) {
+        SIG_INSERT_ID(printextended(s, fSig));
+    } else if (isSigInt(fSig, &i)) {
+        fout << i;
+    } else if (isSigReal(fSig, &r)) {
+        fout << sigs::printReal(r);
+    } else if (isSigWaveform(fSig)) {
+        fout << "waveform{...}";
+    } else if (isSigInput(fSig, &i)) {
+        fout << "IN[" << i << "]";
+    } else if (isSigOutput(fSig, &i, x)) {
+        SIG_INSERT_ID(printout(s, i, x));
+    }
+
+    else if (isSigDelay1(fSig, x)) {
+        SIG_INSERT_ID(printDelay(s, x, sigInt(1)));
+    } else if (isSigDelay(fSig, x, y)) {
+        SIG_INSERT_ID(printDelay(s, x, y));
+    } else if (isSigPrefix(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "prefix", x, y));
+    } else if (isSigBinOp(fSig, &i, x, y)) {
+        SIG_INSERT_ID(printinfix(s, gBinOpTable[i]->fName, gBinOpTable[i]->fPriority, x, y));
+    } else if (isSigFFun(fSig, ff, largs)) {
+        SIG_INSERT_ID(printff(s, ff, largs));
+    } else if (isSigFConst(fSig, type, name, file)) {
+        fout << tree2str(name);
+    } else if (isSigFVar(fSig, type, name, file)) {
+        fout << tree2str(name);
+    }
+
+    if (isSigWRTbl(fSig, w, x, y, z)) {
+        if (y == ::nil()) {
+            // rdtable
+            SIG_INSERT_ID(printfun(s, "WRTbl2p", w, x));
+        } else {
+            // rwtable
+            SIG_INSERT_ID(printfun(s, "sigWRTbl4p", w, x, y, z));
+        }
+    } else if (isSigRDTbl(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "sigRDTbl", x, y));
+    } else if (isSigGen(fSig, x)) {
+        SIG_INSERT_ID(s << "sigGen(" << ppsigShared(x, fEnv, fPriority) << ")");
+    }
+
+    else if (isSigDocConstantTbl(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "docConstantTbl", x, y));
+    } else if (isSigDocWriteTbl(fSig, x, y, z, u)) {
+        SIG_INSERT_ID(printfun(s, "docWriteTbl", x, y, z, u));
+    } else if (isSigDocAccessTbl(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(fout, "docAccessTbl", x, y));
+    }
+
+    else if (isSigSelect2(fSig, sel, x, y)) {
+        SIG_INSERT_ID(printfun(s, "select2", sel, x, y));
+    }
+
+    else if (isSigIntCast(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "int", x));
+    } else if (isSigBitCast(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "bit", x));
+    } else if (isSigFloatCast(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "float", x));
+    }
+
+    else if (isSigButton(fSig, label)) {
+        SIG_INSERT_ID(printui(s, "button", label));
+    } else if (isSigCheckbox(fSig, label)) {
+        SIG_INSERT_ID(printui(s, "checkbox", label));
+    } else if (isSigVSlider(fSig, label, c, x, y, z)) {
+        SIG_INSERT_ID(printui(s, "vslider", label, c, x, y, z));
+    } else if (isSigHSlider(fSig, label, c, x, y, z)) {
+        SIG_INSERT_ID(printui(s, "hslider", label, c, x, y, z));
+    } else if (isSigNumEntry(fSig, label, c, x, y, z)) {
+        SIG_INSERT_ID(printui(s, "nentry", label, c, x, y, z));
+    } else if (isSigVBargraph(fSig, label, x, y, z)) {
+        SIG_INSERT_ID(printui(s, "vbargraph", label, x, y, z));
+    } else if (isSigHBargraph(fSig, label, x, y, z)) {
+        SIG_INSERT_ID(printui(s, "hbargraph", label, x, y, z));
+    }
+
+    else if (isSigSoundfile(fSig, label)) {
+        SIG_INSERT_ID(printui(s, "soundfile", label));
+    } else if (isSigSoundfileLength(fSig, sf, x)) {
+        SIG_INSERT_ID(printfun(s, "length", sf, x));
+    } else if (isSigSoundfileRate(fSig, sf, x)) {
+        SIG_INSERT_ID(printfun(s, "rate", sf, x));
+    } else if (isSigSoundfileBuffer(fSig, sf, x, y, z)) {
+        SIG_INSERT_ID(printfun(s, "buffer", sf, x, y, z));
+    }
+
+    else if (isSigFIR(fSig)) {
+        SIG_INSERT_ID(printfir(s, fSig->branches()));
+    } else if (isSigIIR(fSig)) {
+        SIG_INSERT_ID(printiir(s, fSig->branches()));
+    } else if (isSigSum(fSig)) {
+        SIG_INSERT_ID(printfun(s, "sum", fSig->branches()));
+    }
+
+    else if (isSigTempVar(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "tempvar", x));
+    } else if (isSigPermVar(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "permvar", x));
+    } else if (isSigSeq(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "seq", x, y));
+    } else if (isSigOD(fSig)) {
+        SIG_INSERT_ID(printfun(s, "ondemand", fSig->branches()));
+    } else if (isSigUS(fSig)) {
+        SIG_INSERT_ID(printfun(s, "upsampling", fSig->branches()));
+    } else if (isSigDS(fSig)) {
+        SIG_INSERT_ID(printfun(s, "downsampling", fSig->branches()));
+    } else if (isSigClocked(fSig, x, y)) {
+        // printfun(fout, "clocked", y);
+        SIG_INSERT_ID(s << "clocked(" << ppsigShared(y, fEnv, fPriority) << ")");
+    }
+
+    else if (isSigAttach(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "attach", x, y));
+    } else if (isSigEnable(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "enable", x, y));
+    } else if (isSigControl(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "control", x, y));
+    }
+
+    else if (isSigRegister(fSig, &i, x)) {
+        SIG_INSERT_ID(printfun(s, "register", sigInt(i), x));
+    }
+
+    else if (isNil(fSig)) {
+        fout << "NIL";
+    }
+
+    else {
+        // cerr << "[[" << *fSig << "]]";
+    }
+    return fout;
+}
+
+void ppsigShared::printIDs(ostream& fout, bool sort)
+{
+    /*
+     HACK: since the signal tree shape is still not deterministic,
+     we sort the list to be sure it stays the same.
+     To be removed if the tree shape becomes deterministic.
+     */
+    if (sort) {
+        std::sort(sigs::g.gSignalTrace.begin(), sigs::g.gSignalTrace.end());
+    }
+    fout << "// Size = " << sigs::g.gSignalTrace.size() << endl;
+    for (const auto& it : sigs::g.gSignalTrace) {
+        fout << it;
+    }
+}
+
+//-------------------------------------------------------------------------
+// ppclkenv: Pretty-print clock environment
+//-------------------------------------------------------------------------
+
+/**
+ * @brief Print indentation spaces
+ */
+static void printIndent(int indent, ostream& out)
+{
+    for (int i = 0; i < indent; i++) {
+        out << "  ";
+    }
+}
+
+/**
+ * @brief Helper to print clkEnv with indentation for nested structure
+ */
+static void ppclkenv_indent(Tree clkenv, int depth, int indent, ostream& out)
+{
+    // Base case: nil
+    if (isNil(clkenv)) {
+        out << "nil";
+        return;
+    }
+
+    // ClkEnv structure: cons(parent_clkenv, cons(box_address, input_signals_list))
+    Tree parent = getClockenvEnv(clkenv);
+    Tree box    = getClockenvBox(clkenv);
+    Tree clock  = getClockenvClock(clkenv);
+
+    out << "ClkEnv {" << endl;
+
+    // Print parent environment (recursively)
+    printIndent(indent + 1, out);
+    out << "parent: ";
+    if (isNil(parent)) {
+        out << "nil" << endl;
+    } else {
+        out << endl;
+        printIndent(indent + 1, out);
+        ppclkenv_indent(parent, depth, indent + 1, out);
+        out << endl;
+    }
+
+    // Print box type
+    printIndent(indent + 1, out);
+    out << "box: ";
+    Sym kind = getClockenvKind(clkenv);
+    if (isNil(box)) {
+        out << "nil";
+    } else if (kind == sigs::g.SIGOD) {
+        out << "OnDemand";
+    } else if (kind == sigs::g.SIGUS) {
+        out << "Upsample";
+    } else if (kind == sigs::g.SIGDS) {
+        out << "Downsample";
+    } else {
+        out << box;
+    }
+    out << " @ " << box << endl;
+
+    // Print input signals list
+    printIndent(indent + 1, out);
+    out << "signals: ";
+
+    // Structure: cons(parent, cons(box, signals))
+    // So: tl(clkenv) = cons(box, signals)
+    //     tl(tl(clkenv)) = signals
+    Tree boxAndSignals = tl(clkenv);
+    if (isNil(boxAndSignals)) {
+        out << "[] (boxAndSignals is nil)" << endl;
+    } else {
+        Tree signalsList = tl(boxAndSignals);
+        if (isNil(signalsList)) {
+            out << "[] (signalsList is nil)" << endl;
+        } else {
+            out << "[" << endl;
+            int sigCount = 0;
+            for (Tree l = signalsList; isList(l); l = tl(l)) {
+                Tree sig = hd(l);
+                printIndent(indent + 2, out);
+                out << "[" << sigCount << "] ";
+
+                // Use ppsig with the specified depth
+                ostringstream sigStr;
+                sigStr << ppsig(sig, depth);
+                out << sigStr.str();
+
+                out << endl;
+                sigCount++;
+            }
+            printIndent(indent + 1, out);
+            out << "]" << endl;
+        }
+    }
+
+    printIndent(indent, out);
+    out << "}";
+}
+
+/**
+ * @brief Pretty-print a clock environment (clkEnv) structure
+ */
+void ppclkenv(Tree clkenv, int depth, ostream& out)
+{
+    out << "=== ClkEnv at " << clkenv << " ===" << endl;
+    ppclkenv_indent(clkenv, depth, 0, out);
+    out << endl;
+}
