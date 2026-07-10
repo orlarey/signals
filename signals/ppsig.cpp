@@ -21,6 +21,7 @@
 
 #include "ppsig.hh"
 #include <vector>
+#include "tlib/recursive-print.hh"
 #include "sigs-config.hh"
 #include "binop.hh"
 #include "tlib-error.hh"
@@ -221,13 +222,7 @@ ostream& ppsig::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
     } else if (hide) {
         fout << *var;
     } else {
-        stringstream str_rec;
-        str_rec << ppsig(lexp, addElement(var, fEnv), 0, fMaxSize - 1);
-        if (str_rec.tellp() == 0) {
-            fout << "letrec(" << *var << " = ...)";
-        } else {
-            fout << "letrec(" << *var << " = " << str_rec.str() << ")";
-        }
+        RecursivePrintSession::reference(fout, var, lexp);
     }
     return fout;
 }
@@ -260,6 +255,8 @@ ostream& ppsig::printextended(ostream& fout, Tree sig1) const
 
 ostream& ppsig::print(ostream& fout) const
 {
+    RecursivePrintSession recursiveSession;
+
     // Stops printing when maximum depth is reached
     // fMaxSize now represents recursion depth, not character count
     if (fMaxSize <= 0) {
@@ -403,7 +400,7 @@ ostream& ppsig::print(ostream& fout) const
         printfun(fout, "downsampling", fSig->branches());
     } else if (isSigClocked(fSig, x, y)) {
         // printfun(fout, "clocked", y);
-        return fout << "clocked" << '(' << x << ", " << ppsig(y, fEnv, 0, fMaxSize - 1) << ')';
+        fout << "clocked" << '(' << x << ", " << ppsig(y, fEnv, 0, fMaxSize - 1) << ')';
     }
 
     else if (isSigAttach(fSig, x, y)) {
@@ -425,6 +422,9 @@ ostream& ppsig::print(ostream& fout) const
     else {
         // cerr << "[[" << *fSig << "]]";
     }
+    recursiveSession.finish(fout, [this](ostream& out, Tree var, Tree body) {
+        out << ppsig(body, addElement(var, ::nil()), 0, fMaxSize - 1);
+    });
     return fout;
 }
 
@@ -570,7 +570,7 @@ ostream& ppsigShared::printrec(ostream& fout, Tree var, Tree lexp, bool hide) co
     } else if (hide) {
         fout << *var;
     } else {
-        fout << "letrec(" << *var << " = " << ppsigShared(lexp, addElement(var, fEnv)) << ")";
+        RecursivePrintSession::reference(fout, var, lexp);
     }
     return fout;
 }
@@ -597,6 +597,8 @@ ostream& ppsigShared::printextended(ostream& fout, Tree sig1) const
 
 ostream& ppsigShared::print(ostream& fout) const
 {
+    RecursivePrintSession recursiveSession;
+
     int    i;
     double r;
     Tree   c, sel, w, x, y, z, u, var, le, label, ff, largs, type, name, file, sf;
@@ -750,6 +752,9 @@ ostream& ppsigShared::print(ostream& fout) const
     else {
         // cerr << "[[" << *fSig << "]]";
     }
+    recursiveSession.finish(fout, [](ostream& out, Tree var, Tree body) {
+        out << ppsigShared(body, addElement(var, ::nil()));
+    });
     return fout;
 }
 
