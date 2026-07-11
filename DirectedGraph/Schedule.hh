@@ -1,14 +1,15 @@
-/*******************************************************************************
-********************************************************************************
+/*
+ * Copyright (c) 2020-2025, Yann Orlarey
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
 
-    schedule : a schedule is an ordered set of nodes of some directed graph.
+/*******************************************************************************
+    Schedule.hh
+
+    A schedule is an ordered set of nodes of some directed graph.
     It capture the idea of computing the graph in a certain order that preserves
     the dependencies.
 
-    Created by Yann Orlarey on 17/03/2020.
-    Copyright © 2023 Yann Orlarey. All rights reserved.
-
- *******************************************************************************
  ******************************************************************************/
 
 #pragma once

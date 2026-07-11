@@ -1,12 +1,12 @@
+/*
+ * Copyright (c) 2022-2025, Yann Orlarey
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 /*******************************************************************************
-********************************************************************************
+    DirectedGraphAlgorythm.hh
 
-    digraphop : a set of operations on directed graphs
-
-    Created by Yann Orlarey on 31/01/2022.
-    Copyright © 2023 Yann Orlarey. All rights reserved.
-
- *******************************************************************************
+    A set of operations on directed graphs
  ******************************************************************************/
 
 #pragma once
@@ -324,6 +324,9 @@ inline std::vector<N> serialize(const digraph<N>& G)
 
     std::vector<N> S;
     std::set<N>    V;
+
+    S.reserve(G.nodes().size());
+
     for (const N& n : G.nodes()) {
         visit(G, n, V, S);
     }
@@ -370,10 +373,14 @@ template <typename N>
 inline digraph<N> reverse(const digraph<N>& g)
 {
     digraph<N> r;
-    // copy the destinations
+
     for (const auto& n : g.nodes()) {
         r.add(n);
+    }
+
+    for (const auto& n : g.nodes()) {
         for (const auto& cnx : g.destinations(n)) {
+            // Reverse connection: cnx.first -> n becomes n -> cnx.first
             r.add(cnx.first, n, cnx.second);
         }
     }
