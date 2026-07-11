@@ -24,8 +24,6 @@
 #include <set>
 #include <vector>
 
-#include "DependenciesGraph.hh"
-#include "DependenciesUtils.hh"
 #include "clkEnvInference.hh"
 #include "tlib-error.hh"
 #include "sigs-state.hh"
@@ -549,91 +547,4 @@ Tree ClkEnvInference::getClkEnv(Tree sig)
     }
     TLIB_ASSERT(ce);  // Signal must have an associated clock environment
     return ce;
-}
-
-/**
- * DEBUG: Test function to detect duplicate clkEnv usage across different OD/US/DS signals.
- *
- * This test verifies that each unique OD/US/DS signal has its own unique clock environment.
- * If two different OD/US/DS signals share the same clkEnv, this indicates a bug where
- * de Bruijn notation caused structurally identical but semantically different signals
- * to be assigned the same clock environment.
- *
- * @param hg The hierarchical graph containing subgraphs to test
- * @return true if all clkEnv are unique per signal, false if duplicates are found
- */
-bool ClkEnvInference::testClkEnvUniqueness([[maybe_unused]] const Hgraph& hg)
-{
-    // DEBUG: Function body commented out - bug has been fixed
-    // The bug was that makeClockEnv didn't include slotenv and path parameters,
-    // causing different ondemand domains to share the same clkEnv
-
-    return true;  // Always pass now that the bug is fixed
-
-    /*
-    // std::cerr << "\n=== Testing ClkEnv Uniqueness ===" << std::endl;
-
-    // Map from clkEnv to the list of OD/US/DS signals that use it
-    std::map<Tree, std::vector<Tree>> clkEnvToSignals;
-
-    // Iterate through all subgraphs in the Hgraph
-    // The keys of hg.siggraph are the signals that have subgraphs
-    // For OD/US/DS signals, the key IS the OD/US/DS signal
-    for (const auto& [graphKey, graph] : hg.siggraph) {
-        // Skip the main graph (identified by outSigList)
-        if (graphKey == hg.outSigList) {
-            continue;
-        }
-
-        // Check if this graph key is an OD/US/DS signal
-        tvec V;
-        if (isSigOD(graphKey, V) || isSigUS(graphKey, V) || isSigDS(graphKey, V)) {
-            // Extract clkEnv from the first sub-tree which is sigClocked(clkEnv, h)
-            Tree clockedClk = V[0];
-            Tree clkEnv, h;
-            TLIB_ASSERT(isSigClocked(clockedClk, clkEnv, h));
-
-            clkEnvToSignals[clkEnv].push_back(graphKey);
-            // std::cerr << "  Found OD/US/DS signal " << graphKey << " with clkEnv " << clkEnv
-            //           << std::endl;
-        }
-    }
-
-    // std::cerr << "\nFound " << clkEnvToSignals.size()
-    //           << " unique clkEnv(s) across all OD/US/DS signals" << std::endl;
-
-    // Check for duplicates
-    bool hasErrors      = false;
-    int  totalODSignals = 0;
-
-    for (const auto& [clkEnv, signals] : clkEnvToSignals) {
-        totalODSignals += signals.size();
-
-        if (signals.size() > 1) {
-            // ERROR: Multiple different signals share the same clkEnv!
-            hasErrors = true;
-            std::cerr << "\n*** ERROR: ClkEnv " << clkEnv << " is shared by " << signals.size()
-                      << " different OD/US/DS signals:" << std::endl;
-
-            // Print the clkEnv structure
-            ppclkenv(clkEnv, 10, std::cerr);
-
-            // Print the signals that share this clkEnv
-            for (Tree sig : signals) {
-                std::cerr << "  - Signal at address " << sig << " -- " << ppsig(sig, 6)
-                          << std::endl;
-            }
-        }
-    }
-
-    // std::cerr << "\nTotal OD/US/DS signals found: " << totalODSignals << std::endl;
-
-    if (hasErrors) {
-        std::cerr << "*** TEST FAILED: Duplicate clkEnv detected! ***" << std::endl;
-        return false;
-    } else {
-        // std::cerr << "*** TEST PASSED: All clkEnv are unique ***" << std::endl;
-        return true;
-    }
-    */
 }

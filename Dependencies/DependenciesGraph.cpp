@@ -180,9 +180,6 @@ Hgraph dependenciesGraphs(Tree signalList)
     Hgraph hg = {signalList, ctrlGraph, sigToGraph};
     // DEBUG: auditHgraph(hg);
 
-    // DEBUG: Test that each OD/US/DS signal has a unique clkEnv
-    // ClkEnvInference::testClkEnvUniqueness(hg);
-
     // Compute schedules
     return hg;
 }

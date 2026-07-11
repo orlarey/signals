@@ -47,19 +47,6 @@ class ClkEnvInference {
      * @throws via TLIB_ASSERT if triggered: an assertion if the signal has no associated clock environment
      */
     static Tree getClkEnv(Tree sig);
-
-    /**
-     * @brief Test that each OD/US/DS signal has a unique clock environment
-     *
-     * This test function verifies the invariant that different OD/US/DS signals
-     * should never share the same clock environment. If duplicates are found,
-     * it indicates a bug in clock environment creation (likely due to de Bruijn
-     * notation issues).
-     *
-     * @param hg The hierarchical graph containing the subgraphs to test
-     * @return true if all clkEnv are unique, false if duplicates are detected
-     */
-    static bool testClkEnvUniqueness(const struct Hgraph& hg);
 };
 
 bool isAncestorClkEnv(Tree c1, Tree c2);
