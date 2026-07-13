@@ -13,6 +13,10 @@
 #include "sigs-export.hh"
 #include "tree.hh"
 
+//--------------------------------------------------------------------------
+// Public API
+//--------------------------------------------------------------------------
+
 /**
  * Replace every n-component symbolic recursive signal group with n fresh
  * one-component groups. A projection proj(i, R) becomes proj(0, R_i).
@@ -20,6 +24,11 @@
  * The transformation is pure: RECDEF properties of the source groups are
  * never modified. Sharing outside rewritten recursive references is
  * preserved by a per-call memo.
+ *
+ * Semantically, this is the product-coordinate step underlying Bekić's
+ * theorem (the pairing identity for fixed points). It preserves simultaneous
+ * dependencies between the scalar equations; it does not perform their
+ * successive elimination.
  */
 SIGS_API Tree sigScalarize(Tree signal);
 
@@ -28,4 +37,3 @@ SIGS_API Tree sigScalarize(Tree signal);
  * index zero and targets a symbolic group whose RECDEF is a singleton list.
  */
 SIGS_API bool isSigScalarized(Tree signal);
-
