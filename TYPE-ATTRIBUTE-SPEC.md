@@ -301,7 +301,7 @@ Le résolveur de dépendances construit un plan commun contenant :
 - les dépendants immédiats ;
 - un ordre d’évaluation déterministe.
 
-Le plan peut être réutilisé par plusieurs analyses tant que la structure de l’arbre ne change pas. La scalarisation décrite dans [MUTUALRECURSION.md](MUTUALRECURSION.md) simplifie les groupes mais ne supprime pas les SCC mutuellement récursives.
+Le plan peut être réutilisé par plusieurs analyses tant que la structure de l’arbre ne change pas. La transformation `sigScalarize` simplifie les groupes en groupes singletons mais ne supprime pas les SCC mutuellement récursives.
 
 ### Caches et invalidation séparés
 
@@ -428,16 +428,13 @@ L’ancien `FixPointUpdate` de `FaustAlgebra` n’est pas utilisé par ces analy
 
 ## Statut de SigTypeAlgebra
 
-Le prototype actuel `sigTypeAlgebra.hh/.cpp`, dont le porteur est `Type`, a permis de vérifier que des règles locales peuvent être exprimées sous forme de `FaustAlgebra` et comparées au moteur historique.
+Le prototype `sigTypeAlgebra.hh/.cpp`, dont le porteur était `Type`, a permis de vérifier que des règles locales peuvent être exprimées sous forme de `FaustAlgebra` et comparées au moteur historique.
 
-Il ne constitue plus l’architecture cible, car il reproduit le produit monolithique identifié dans cette spécification. Il ne faut donc pas étendre systématiquement ses opérations `unsupported` avant d’avoir introduit les domaines séparés.
+Il a été retiré après cette validation, car il reproduisait le produit monolithique identifié dans cette spécification. Le conserver ou compléter ses opérations `unsupported` aurait créé une seconde implémentation provisoire du typeur historique, puis imposé une nouvelle redistribution de ses règles.
 
-Deux usages transitoires sont possibles :
+Le premier porteur cible `CoreType` et le point d’entrée `sigCoreTypeAlgebra()` les remplacent. Leur premier jalon couvre les constantes scalaires, entrées, sorties, interfaces utilisateur de base, casts, opérations binaires, sélection et retards simples. Les tests comparent uniquement les composantes structurelles au typeur historique ; aucun intervalle n’entre dans `CoreType`.
 
-- le conserver brièvement comme oracle local et banc de comparaison ;
-- le remplacer directement par `sigCoreTypeAlgebra` et déplacer les règles d’intervalles dans `sigIntervalAlgebra`.
-
-Le choix doit être fait avant l’intégration dans Faust afin de ne pas créer une nouvelle API publique provisoire difficile à retirer.
+Les opérations de `sigCoreTypeAlgebra` qui ne sont pas encore migrées échouent explicitement. Cette incomplétude est transitoire mais porte désormais sur l’architecture définitive, et non sur un porteur destiné à disparaître.
 
 ## Migration
 
@@ -556,8 +553,7 @@ Un test récursif doit montrer qu’une évolution d’intervalle :
 5. Faut-il un compteur par nœud, par borne ou par SCC pour les intervalles ?
 6. Le même plan de dépendances suffit-il pour toutes les analyses, ou certaines primitives introduisent-elles des dépendances propres à un attribut ?
 7. Quand la scalarisation doit-elle entrer dans la chaîne afin de simplifier les tuples récursifs sans compliquer la comparaison avec le moteur historique ?
-8. Le prototype `SigTypeAlgebra<Type>` doit-il être conservé comme outil de test ou remplacé avant son premier transfert dans Faust ?
-9. Le contrat arithmétique de l’analyse des constantes exclut-il `NaN` et les infinis, ou le domaine doit-il les représenter explicitement ?
-10. Les retards de longueur non constante nécessitent-ils une information d’initialisation plus riche que le cas statique $n>0$ ?
+8. Le contrat arithmétique de l’analyse des constantes exclut-il `NaN` et les infinis, ou le domaine doit-il les représenter explicitement ?
+9. Les retards de longueur non constante nécessitent-ils une information d’initialisation plus riche que le cas statique $n>0$ ?
 
-Ces questions n’empêchent pas le premier jalon : introduire `CoreType`, porter un sous-ensemble non récursif et comparer ses composantes exactes au type historique sans calculer encore les intervalles.
+Ces questions n’empêchent pas le premier jalon, maintenant engagé : étendre progressivement `CoreType` tout en comparant ses composantes exactes au type historique, sans calculer encore les intervalles.

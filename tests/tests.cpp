@@ -33,7 +33,7 @@
 #include "interval_algebra.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
-#include "sigTypeAlgebra.hh"
+#include "sigCoreTypeAlgebra.hh"
 #include "sigtype.hh"
 #include "sigtyperules.hh"
 #include "sigScalarize.hh"
@@ -375,6 +375,39 @@ struct TreeFaustRebuildRule {
     }
 };
 
+// Compare only finite structural qualities so interval and resolution data
+// cannot accidentally participate in CoreType validation.
+bool matchesLegacyCore(const CoreType& core, const Type& legacy)
+{
+    if (!core.isScalar() || !legacy) {
+        return false;
+    }
+
+    const CoreNature nature =
+        (legacy->nature() == kInt) ? CoreNature::Integer : CoreNature::Real;
+    const CoreVariability variability =
+        (legacy->variability() == kKonst)
+            ? CoreVariability::Constant
+            : ((legacy->variability() == kBlock) ? CoreVariability::Block
+                                                  : CoreVariability::Sample);
+    const CoreComputability computability =
+        (legacy->computability() == kComp)
+            ? CoreComputability::Compile
+            : ((legacy->computability() == kInit) ? CoreComputability::Init
+                                                   : CoreComputability::Execute);
+    const CoreVectorability vectorability =
+        (legacy->vectorability() == kVect)
+            ? CoreVectorability::Vector
+            : ((legacy->vectorability() == kScal) ? CoreVectorability::Scalar
+                                                   : CoreVectorability::TrueScalar);
+    const CoreBoolean boolean =
+        (legacy->boolean() == kNum) ? CoreBoolean::Numeric : CoreBoolean::Boolean;
+
+    return core.nature == nature && core.variability == variability &&
+           core.computability == computability && core.vectorability == vectorability &&
+           core.boolean == boolean;
+}
+
 }  // namespace
 
 static void check(bool ok, const std::string& what)
@@ -428,25 +461,63 @@ int main()
     check(t->getInterval().lo() >= -0.5 && t->getInterval().hi() <= 1.5,
           "interval: product bounded by [-0.5, 1.5]");
 
-    // Rebuild the same non-recursive expression through FaustAlgebra only.
-    // Exact agreement makes the legacy typer an oracle during incremental migration.
-    FaustAlgebra<Type>& typeAlgebra = sigTypeAlgebra();
-    Type algebraInput = typeAlgebra.Input(typeAlgebra.IntNum(0));
-    Type algebraHalf  = typeAlgebra.FloatNum(0.5);
-    Type algebraSum   = typeAlgebra.Add(algebraInput, algebraHalf);
-    Type algebraSlider = typeAlgebra.VSlider(
-        typeAlgebra.Label("level"), algebraHalf, typeAlgebra.IntNum(0), typeAlgebra.IntNum(1),
-        typeAlgebra.FloatNum(0.01));
-    Type algebraProduct = typeAlgebra.Mul(algebraSum, algebraSlider);
+    // Rebuild the structural part only, keeping interval inference outside the
+    // carrier so the legacy typer remains an independent comparison oracle.
+    FaustAlgebra<CoreType>& coreAlgebra = sigCoreTypeAlgebra();
+    CoreType coreInput = coreAlgebra.Input(coreAlgebra.IntNum(0));
+    CoreType coreHalf  = coreAlgebra.FloatNum(0.5);
+    CoreType coreSum   = coreAlgebra.Add(coreInput, coreHalf);
+    CoreType coreSlider = coreAlgebra.VSlider(
+        coreAlgebra.Label("level"), coreHalf, coreAlgebra.IntNum(0), coreAlgebra.IntNum(1),
+        coreAlgebra.FloatNum(0.01));
+    CoreType coreProduct = coreAlgebra.Mul(coreSum, coreSlider);
 
-    check(algebraSlider == ts, "type algebra: slider matches legacy inference");
-    check(algebraProduct == t, "type algebra: input expression matches legacy inference");
+    check(matchesLegacyCore(coreSlider, ts),
+          "core type algebra: slider matches legacy structural inference");
+    check(matchesLegacyCore(coreProduct, t),
+          "core type algebra: input expression matches legacy structural inference");
 
-    Type algebraComparison = typeAlgebra.Lt(typeAlgebra.IntNum(1), typeAlgebra.FloatNum(2.0));
-    check(algebraComparison->nature() == kInt && algebraComparison->boolean() == kBool &&
-              algebraComparison->getInterval().lo() == 1.0 &&
-              algebraComparison->getInterval().hi() == 1.0,
-          "type algebra: comparison produces a boolean integer interval");
+    CoreType coreComparison =
+        coreAlgebra.Lt(coreAlgebra.IntNum(1), coreAlgebra.FloatNum(2.0));
+    Tree comparison = sigLT(sigInt(1), sigReal(2.0));
+    typeAnnotation(comparison, false);
+    check(matchesLegacyCore(coreComparison, getCertifiedSigType(comparison)),
+          "core type algebra: comparison matches legacy structural inference");
+
+    // Bargraphs preserve the displayed signal qualities and impose at least
+    // block variability; the fourth algebra operand makes that rule possible.
+    CoreType coreBargraph =
+        coreAlgebra.HBargraph(coreAlgebra.Label("meter"), coreAlgebra.IntNum(-1),
+                              coreAlgebra.IntNum(1), coreAlgebra.FloatNum(0.25));
+    Tree bargraph = sigHBargraph(tree("\"meter\""), sigInt(-1), sigInt(1), sigReal(0.25));
+    typeAnnotation(bargraph, false);
+    check(matchesLegacyCore(coreBargraph, getCertifiedSigType(bargraph)),
+          "core type algebra: bargraph matches legacy structural inference");
+
+    CoreType coreControlled = coreAlgebra.Control(coreInput, coreAlgebra.Button({}));
+    CoreType coreBounded =
+        coreAlgebra.AssertBounds(coreAlgebra.IntNum(-1), coreAlgebra.IntNum(1), coreControlled);
+    check(coreBounded == coreInput,
+          "core type algebra: control and asserted bounds preserve structural type");
+
+    CoreType coreExp10 = coreAlgebra.Exp10(coreAlgebra.IntNum(2));
+    CoreType coreRemainder =
+        coreAlgebra.Remainder(coreAlgebra.IntNum(5), coreAlgebra.IntNum(2));
+    CoreType coreARsh = coreAlgebra.ARsh(coreAlgebra.IntNum(-8), coreAlgebra.IntNum(1));
+    CoreType coreLRsh = coreAlgebra.LRsh(coreAlgebra.IntNum(-8), coreAlgebra.IntNum(1));
+    check(coreExp10.nature == CoreNature::Real && coreRemainder.nature == CoreNature::Real &&
+              coreARsh.nature == CoreNature::Integer && coreLRsh.nature == CoreNature::Integer,
+          "core type algebra: added numeric operations have their structural nature");
+
+    interval bargraphRange =
+        gAlgebra.HBargraph(interval(0), interval(-1), interval(1), interval(-0.5, 0.5));
+    interval boundedRange =
+        gAlgebra.AssertBounds(interval(-1), interval(1), interval(-2, 2));
+    interval exp10Range = gAlgebra.Exp10(interval(2));
+    check(bargraphRange.lo() == -0.5 && bargraphRange.hi() == 0.5 &&
+              boundedRange.lo() == -1 && boundedRange.hi() == 1 && exp10Range.lo() == 100 &&
+              exp10Range.hi() == 100,
+          "interval algebra: added operations preserve and refine ranges");
 
     // --- recursive pretty-printing ----------------------------------------
     Tree recVar  = tree("R");
