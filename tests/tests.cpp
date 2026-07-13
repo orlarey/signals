@@ -33,6 +33,7 @@
 #include "interval_algebra.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
+#include "sigTypeAlgebra.hh"
 #include "sigtype.hh"
 #include "sigtyperules.hh"
 #include "sigScalarize.hh"
@@ -426,6 +427,26 @@ int main()
     // input + 0.5 is [-0.5, 1.5], times slider [0, 1] -> product in [-0.5, 1.5]
     check(t->getInterval().lo() >= -0.5 && t->getInterval().hi() <= 1.5,
           "interval: product bounded by [-0.5, 1.5]");
+
+    // Rebuild the same non-recursive expression through FaustAlgebra only.
+    // Exact agreement makes the legacy typer an oracle during incremental migration.
+    FaustAlgebra<Type>& typeAlgebra = sigTypeAlgebra();
+    Type algebraInput = typeAlgebra.Input(typeAlgebra.IntNum(0));
+    Type algebraHalf  = typeAlgebra.FloatNum(0.5);
+    Type algebraSum   = typeAlgebra.Add(algebraInput, algebraHalf);
+    Type algebraSlider = typeAlgebra.VSlider(
+        typeAlgebra.Label("level"), algebraHalf, typeAlgebra.IntNum(0), typeAlgebra.IntNum(1),
+        typeAlgebra.FloatNum(0.01));
+    Type algebraProduct = typeAlgebra.Mul(algebraSum, algebraSlider);
+
+    check(algebraSlider == ts, "type algebra: slider matches legacy inference");
+    check(algebraProduct == t, "type algebra: input expression matches legacy inference");
+
+    Type algebraComparison = typeAlgebra.Lt(typeAlgebra.IntNum(1), typeAlgebra.FloatNum(2.0));
+    check(algebraComparison->nature() == kInt && algebraComparison->boolean() == kBool &&
+              algebraComparison->getInterval().lo() == 1.0 &&
+              algebraComparison->getInterval().hi() == 1.0,
+          "type algebra: comparison produces a boolean integer interval");
 
     // --- recursive pretty-printing ----------------------------------------
     Tree recVar  = tree("R");
