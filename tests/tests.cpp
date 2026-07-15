@@ -26,7 +26,9 @@
 #include <cmath>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bottom-up-attributes.hh"
@@ -34,6 +36,8 @@
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigCoreTypeAlgebra.hh"
+#include "sigFold.hh"
+#include "sigOpcode.hh"
 #include "sigtype.hh"
 #include "sigtyperules.hh"
 #include "sigScalarize.hh"
@@ -375,6 +379,18 @@ struct TreeFaustRebuildRule {
     }
 };
 
+// This initial algebra reconstructs exactly the numeric subset accepted by
+// foldSignal. Hash-consing should therefore return the original acyclic Tree.
+struct NumericTreeAlgebra {
+    Tree IntNum(int value) { return sigInt(value); }
+    Tree Int64Num(int64_t value) { return sigInt64(value); }
+    Tree FloatNum(double value) { return sigReal(value); }
+    Tree Add(Tree x, Tree y) { return sigAdd(x, y); }
+    Tree Sub(Tree x, Tree y) { return sigSub(x, y); }
+    Tree Mul(Tree x, Tree y) { return sigMul(x, y); }
+    Tree Div(Tree x, Tree y) { return sigDiv(x, y); }
+};
+
 // Compare only finite structural qualities so interval and resolution data
 // cannot accidentally participate in CoreType validation.
 bool matchesLegacyCore(const CoreType& core, const Type& legacy)
@@ -433,6 +449,147 @@ int main()
     Tree b = sigAdd(sigInput(0), sigReal(0.5));
     check(a == b, "hash-consing: same expression, same tree");
     check(a != sigAdd(sigInput(0), sigReal(0.25)), "hash-consing: different expressions differ");
+
+    // --- Signature registration and first algebraic fold -----------------
+    // Signal constructors use the dense local opcodes assigned by their
+    // shared signature, so fold dispatch never depends on global range bases.
+    sigs::initSignalSymbols();  // Repeated host registration must be harmless.
+    const Signature signalSignature = sigs::signalSignature();
+    const std::vector<std::pair<Sym, sigs::SignalOpcode>> registeredConstructors = {
+        {sigs::g.SIGINPUT, sigs::SignalOpcode::Input},
+        {sigs::g.SIGOUTPUT, sigs::SignalOpcode::Output},
+        {sigs::g.SIGDELAY1, sigs::SignalOpcode::Delay1},
+        {sigs::g.SIGDELAY, sigs::SignalOpcode::Delay},
+        {sigs::g.SIGPREFIX, sigs::SignalOpcode::Prefix},
+        {sigs::g.SIGRDTBL, sigs::SignalOpcode::ReadTable},
+        {sigs::g.SIGWRTBL, sigs::SignalOpcode::WriteTable},
+        {sigs::g.SIGGEN, sigs::SignalOpcode::Generator},
+        {sigs::g.SIGDOCONSTANTTBL, sigs::SignalOpcode::DocConstantTable},
+        {sigs::g.SIGDOCWRITETBL, sigs::SignalOpcode::DocWriteTable},
+        {sigs::g.SIGDOCACCESSTBL, sigs::SignalOpcode::DocAccessTable},
+        {sigs::g.SIGSELECT2, sigs::SignalOpcode::Select2},
+        {sigs::g.SIGASSERTBOUNDS, sigs::SignalOpcode::AssertBounds},
+        {sigs::g.SIGHIGHEST, sigs::SignalOpcode::Highest},
+        {sigs::g.SIGLOWEST, sigs::SignalOpcode::Lowest},
+        {sigs::g.SIGBINOP, sigs::SignalOpcode::BinOp},
+        {sigs::g.SIGFFUN, sigs::SignalOpcode::ForeignFunction},
+        {sigs::g.SIGFCONST, sigs::SignalOpcode::ForeignConstant},
+        {sigs::g.SIGFVAR, sigs::SignalOpcode::ForeignVariable},
+        {sigs::g.SIGPROJ, sigs::SignalOpcode::Projection},
+        {sigs::g.SIGINTCAST, sigs::SignalOpcode::IntCast},
+        {sigs::g.SIGBITCAST, sigs::SignalOpcode::BitCast},
+        {sigs::g.SIGFLOATCAST, sigs::SignalOpcode::FloatCast},
+        {sigs::g.SIGBUTTON, sigs::SignalOpcode::Button},
+        {sigs::g.SIGCHECKBOX, sigs::SignalOpcode::Checkbox},
+        {sigs::g.SIGWAVEFORM, sigs::SignalOpcode::Waveform},
+        {sigs::g.SIGHSLIDER, sigs::SignalOpcode::HSlider},
+        {sigs::g.SIGVSLIDER, sigs::SignalOpcode::VSlider},
+        {sigs::g.SIGNUMENTRY, sigs::SignalOpcode::NumEntry},
+        {sigs::g.SIGHBARGRAPH, sigs::SignalOpcode::HBargraph},
+        {sigs::g.SIGVBARGRAPH, sigs::SignalOpcode::VBargraph},
+        {sigs::g.SIGATTACH, sigs::SignalOpcode::Attach},
+        {sigs::g.SIGENABLE, sigs::SignalOpcode::Enable},
+        {sigs::g.SIGCONTROL, sigs::SignalOpcode::Control},
+        {sigs::g.SIGSOUNDFILE, sigs::SignalOpcode::Soundfile},
+        {sigs::g.SIGSOUNDFILELENGTH, sigs::SignalOpcode::SoundfileLength},
+        {sigs::g.SIGSOUNDFILERATE, sigs::SignalOpcode::SoundfileRate},
+        {sigs::g.SIGSOUNDFILEBUFFER, sigs::SignalOpcode::SoundfileBuffer},
+        {sigs::g.SIGREGISTER, sigs::SignalOpcode::Register},
+        {sigs::g.SIGTUPLE, sigs::SignalOpcode::Tuple},
+        {sigs::g.SIGTUPLEACCESS, sigs::SignalOpcode::TupleAccess},
+        {sigs::g.SIGFIR, sigs::SignalOpcode::FIR},
+        {sigs::g.SIGIIR, sigs::SignalOpcode::IIR},
+        {sigs::g.SIGSUM, sigs::SignalOpcode::Sum},
+        {sigs::g.SIGTEMPVAR, sigs::SignalOpcode::TempVar},
+        {sigs::g.SIGPERMVAR, sigs::SignalOpcode::PermVar},
+        {sigs::g.SIGZEROPAD, sigs::SignalOpcode::ZeroPad},
+        {sigs::g.SIGSEQ, sigs::SignalOpcode::Seq},
+        {sigs::g.SIGOD, sigs::SignalOpcode::OD},
+        {sigs::g.SIGUS, sigs::SignalOpcode::US},
+        {sigs::g.SIGDS, sigs::SignalOpcode::DS},
+        {sigs::g.SIGCLOCKED, sigs::SignalOpcode::Clocked},
+    };
+    bool completeSignalSignature =
+        registeredConstructors.size() == static_cast<std::size_t>(sigs::SignalOpcode::Count);
+    for (const auto& constructor : registeredConstructors) {
+        SymbolTag tag;
+        completeSignalSignature = completeSignalSignature &&
+                                  getSymbolTag(constructor.first, tag) &&
+                                  tag.signature == signalSignature.identity() &&
+                                  tag.localOpcode() ==
+                                      static_cast<std::uint8_t>(constructor.second);
+    }
+    check(completeSignalSignature,
+          "signal signature: every constructor has its declared dense opcode");
+
+    SymbolTag binopTag;
+    check(getSymbolTag(a->node().getSym(), binopTag) &&
+              binopTag.signature == signalSignature.identity() &&
+              binopTag.localOpcode() == static_cast<std::uint8_t>(sigs::SignalOpcode::BinOp) &&
+              signalSignature.add("SigBinOp") == a->node().getSym(),
+          "signal opcode: SIGBINOP belongs to the signal signature");
+
+    sigs::SignalNodeView addView(a);
+    check(addView.opcode() == sigs::SignalOpcode::BinOp && addView.childCount() == 2 &&
+              addView.integerMetadata(0) == kAdd && addView.child(0) == sigInput(0) &&
+              addView.child(1) == sigReal(0.5),
+          "signal node view: binop metadata is separate from semantic children");
+
+    sigs::SignalNodeView inputView(sigInput(3));
+    check(inputView.opcode() == sigs::SignalOpcode::Input && inputView.childCount() == 0 &&
+              inputView.integerMetadata(0) == 3,
+          "signal node view: input channel remains static metadata");
+
+    check(sigInt(1)->node().type() == kIntNode,
+          "signal opcode: numeric atoms remain structural values without symbols");
+
+    const Signature foreignSignature = signature("Test.ForeignSignature");
+    Sym foreignNode = foreignSignature.add("Test.ForeignConstructor");
+    bool wrongSignatureRejected = false;
+    try {
+        sigs::SignalNodeView view(tree(foreignNode));
+    } catch (const std::runtime_error&) {
+        wrongSignatureRejected = true;
+    }
+    check(wrongSignatureRejected,
+          "signal node view: a foreign constructor signature is rejected");
+
+    Tree sharedNumeric = sigAdd(sigInt(1), sigInt(2));
+    Tree numeric       = sigMul(sharedNumeric, sharedNumeric);
+    NumericTreeAlgebra treeAlgebra;
+    sigs::SignalFoldReport treeFoldReport;
+    Tree rebuiltNumeric =
+        sigs::foldSignal<Tree>(numeric, treeAlgebra, &treeFoldReport);
+    check(rebuiltNumeric == numeric,
+          "signal fold: syntax algebra reconstructs the identical hash-consed tree");
+    check(treeFoldReport.evaluations == 4 && treeFoldReport.cacheHits == 1,
+          "signal fold: a shared sub-signal is evaluated once");
+
+    FaustAlgebra<CoreType>& automaticCoreAlgebra = sigCoreTypeAlgebra();
+    CoreType automaticCore =
+        sigs::foldSignal<CoreType>(numeric, automaticCoreAlgebra);
+    typeAnnotation(numeric, false);
+    check(matchesLegacyCore(automaticCore, getCertifiedSigType(numeric)),
+          "signal fold: CoreType matches historical inference automatically");
+
+    Tree allNumericOps =
+        sigDiv(sigSub(sigInt(8), sigInt(2)), sigMul(sigInt(2), sigInt(3)));
+    check(sigs::foldSignal<Tree>(allNumericOps, treeAlgebra) == allNumericOps,
+          "signal fold: Add, Sub, Mul and Div dispatch through the numeric algebra");
+    CoreType allNumericCore =
+        sigs::foldSignal<CoreType>(allNumericOps, automaticCoreAlgebra);
+    typeAnnotation(allNumericOps, false);
+    check(matchesLegacyCore(allNumericCore, getCertifiedSigType(allNumericOps)),
+          "signal fold: mixed numeric operations match historical inference");
+
+    bool unsupportedInputRejected = false;
+    try {
+        sigs::foldSignal<CoreType>(sigInput(0), automaticCoreAlgebra);
+    } catch (const std::runtime_error&) {
+        unsupportedInputRejected = true;
+    }
+    check(unsupportedInputRejected,
+          "signal fold: a tagged constructor outside the initial subset is rejected");
 
     int  i = -1;
     Tree x, y;

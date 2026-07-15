@@ -39,10 +39,29 @@
 
 namespace sigs {
 
-/// Standalone initialization of the library state (symbols, property keys,
-/// type singletons, session state, option defaults). The Faust compiler
-/// does NOT call it (global.cpp performs the same writes in its own order);
-/// standalone hosts call it after tlib::init(), once per session.
+//--------------------------------------------------------------------------
+// Public API: session initialization
+//--------------------------------------------------------------------------
+
+/**
+ * Register every SIG* constructor in the shared Signal signature.
+ *
+ * Call this after tlib::init() and before constructing signals. The function
+ * fills the SIG* fields of sigs::g in SignalOpcode order so their dense local
+ * opcodes remain valid dispatch indices. Repeating it in the same TLIB session
+ * is idempotent. Faust can call this focused entry point while retaining its
+ * own initialization of the remaining global state.
+ */
+SIGS_API void initSignalSymbols();
+
+/**
+ * Initialize the complete signal library state for a standalone host.
+ *
+ * This registers signal symbols, property keys and type singletons, then
+ * resets session state and option defaults. Call it after tlib::init(), once
+ * per session. Faust does not call it because global.cpp performs the
+ * non-signal initialization in its own order.
+ */
 SIGS_API void init();
 
 /// Simplifies (normalizes) a signal expression; used by the FIR/IIR analyses.

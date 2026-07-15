@@ -26,6 +26,7 @@
 #include <cstring>
 
 #include "interval.hh"
+#include "sigOpcode.hh"
 #include "signals.hh"
 #include "sigs-state.hh"
 #include "sigtype.hh"
@@ -36,70 +37,95 @@ itv::interval_algebra gAlgebra;
 
 namespace sigs {
 
+//--------------------------------------------------------------------------
+// Public API: session initialization
+//--------------------------------------------------------------------------
+
 /**
- * Standalone initialization of the library state: symbols, property keys,
- * type singletons, session state and option defaults. NOT called by the
- * Faust compiler, which performs the same writes itself in global.cpp (in
- * its own, order-sensitive sequence); intended for standalone hosts and
- * tests. Requires tlib::init() first. Can be called again between two
- * sessions (after tlib::init()).
+ * Register every SIG* constructor in the shared Signal signature.
+ *
+ * Call this after tlib::init() and before constructing signals. The function
+ * fills the SIG* fields of sigs::g in SignalOpcode order so their dense local
+ * opcodes remain valid dispatch indices. Repeating it in the same TLIB session
+ * is idempotent. Faust can call this focused entry point while retaining its
+ * own initialization of the remaining global state.
+ */
+void initSignalSymbols()
+{
+    const Signature signal_signature = signalSignature();
+
+    // Every SIG* symbol is a constructor of the Signal language. Keeping
+    // these add() calls in SignalOpcode declaration order makes their dense
+    // local opcodes usable directly by folds without a translation table.
+    g.SIGINPUT           = signal_signature.add("SigInput");
+    g.SIGOUTPUT          = signal_signature.add("SigOutput");
+    g.SIGDELAY1          = signal_signature.add("SigDelay1");
+    g.SIGDELAY           = signal_signature.add("SigDelay");
+    g.SIGPREFIX          = signal_signature.add("SigPrefix");
+    g.SIGRDTBL           = signal_signature.add("SigRDTbl");
+    g.SIGWRTBL           = signal_signature.add("SigWRTbl");
+    g.SIGGEN             = signal_signature.add("SigGen");
+    g.SIGDOCONSTANTTBL   = signal_signature.add("SigDocConstantTbl");
+    g.SIGDOCWRITETBL     = signal_signature.add("SigDocWriteTbl");
+    g.SIGDOCACCESSTBL    = signal_signature.add("SigDocAccessTbl");
+    g.SIGSELECT2         = signal_signature.add("SigSelect2");
+    g.SIGASSERTBOUNDS    = signal_signature.add("sigAssertBounds");
+    g.SIGHIGHEST         = signal_signature.add("sigHighest");
+    g.SIGLOWEST          = signal_signature.add("sigLowest");
+    g.SIGBINOP           = signal_signature.add("SigBinOp");
+    g.SIGFFUN            = signal_signature.add("SigFFun");
+    g.SIGFCONST          = signal_signature.add("SigFConst");
+    g.SIGFVAR            = signal_signature.add("SigFVar");
+    g.SIGPROJ            = signal_signature.add("SigProj");
+    g.SIGINTCAST         = signal_signature.add("SigIntCast");
+    g.SIGBITCAST         = signal_signature.add("SigBitCast");
+    g.SIGFLOATCAST       = signal_signature.add("SigFloatCast");
+    g.SIGBUTTON          = signal_signature.add("SigButton");
+    g.SIGCHECKBOX        = signal_signature.add("SigCheckbox");
+    g.SIGWAVEFORM        = signal_signature.add("SigWaveform");
+    g.SIGHSLIDER         = signal_signature.add("SigHSlider");
+    g.SIGVSLIDER         = signal_signature.add("SigVSlider");
+    g.SIGNUMENTRY        = signal_signature.add("SigNumEntry");
+    g.SIGHBARGRAPH       = signal_signature.add("SigHBargraph");
+    g.SIGVBARGRAPH       = signal_signature.add("SigVBargraph");
+    g.SIGATTACH          = signal_signature.add("SigAttach");
+    g.SIGENABLE          = signal_signature.add("SigEnable");
+    g.SIGCONTROL         = signal_signature.add("SigControl");
+    g.SIGSOUNDFILE       = signal_signature.add("SigSoundfile");
+    g.SIGSOUNDFILELENGTH = signal_signature.add("SigSoundfileLength");
+    g.SIGSOUNDFILERATE   = signal_signature.add("SigSoundfileRate");
+    g.SIGSOUNDFILEBUFFER = signal_signature.add("SigSoundfileBuffer");
+    g.SIGREGISTER        = signal_signature.add("SigRegister");
+    g.SIGTUPLE           = signal_signature.add("SigTuple");
+    g.SIGTUPLEACCESS     = signal_signature.add("SigTupleAccess");
+    g.SIGFIR             = signal_signature.add("SigFIR");
+    g.SIGIIR             = signal_signature.add("SigIIR");
+    g.SIGSUM             = signal_signature.add("SigSum");
+    g.SIGTEMPVAR         = signal_signature.add("SigTempVar");
+    g.SIGPERMVAR         = signal_signature.add("SigPermVar");
+    g.SIGZEROPAD         = signal_signature.add("SigZeroPad");
+    g.SIGSEQ             = signal_signature.add("SigSeq");
+    g.SIGOD              = signal_signature.add("SigOD");
+    g.SIGUS              = signal_signature.add("SigUS");
+    g.SIGDS              = signal_signature.add("SigDS");
+    g.SIGCLOCKED         = signal_signature.add("SigClocked");
+}
+
+/**
+ * Initialize the complete signal library state for a standalone host.
+ *
+ * This registers signal symbols, property keys and type singletons, then
+ * resets session state and option defaults. Call it after tlib::init(), once
+ * per session. Faust does not call it because global.cpp performs the
+ * non-signal initialization in its own order.
  */
 void init()
 {
-    // Symbols (same names as in global.cpp)
-    g.FFUN               = symbol("ForeignFunction");
-    g.SIGINPUT           = symbol("SigInput");
-    g.SIGOUTPUT          = symbol("SigOutput");
-    g.SIGDELAY1          = symbol("SigDelay1");
-    g.SIGDELAY           = symbol("SigDelay");
-    g.SIGPREFIX          = symbol("SigPrefix");
-    g.SIGRDTBL           = symbol("SigRDTbl");
-    g.SIGWRTBL           = symbol("SigWRTbl");
-    g.SIGGEN             = symbol("SigGen");
-    g.SIGDOCONSTANTTBL   = symbol("SigDocConstantTbl");
-    g.SIGDOCWRITETBL     = symbol("SigDocWriteTbl");
-    g.SIGDOCACCESSTBL    = symbol("SigDocAccessTbl");
-    g.SIGSELECT2         = symbol("SigSelect2");
-    g.SIGASSERTBOUNDS    = symbol("sigAssertBounds");
-    g.SIGHIGHEST         = symbol("sigHighest");
-    g.SIGLOWEST          = symbol("sigLowest");
-    g.SIGBINOP           = symbol("SigBinOp");
-    g.SIGFFUN            = symbol("SigFFun");
-    g.SIGFCONST          = symbol("SigFConst");
-    g.SIGFVAR            = symbol("SigFVar");
-    g.SIGPROJ            = symbol("SigProj");
-    g.SIGINTCAST         = symbol("SigIntCast");
-    g.SIGBITCAST         = symbol("SigBitCast");
-    g.SIGFLOATCAST       = symbol("SigFloatCast");
-    g.SIGBUTTON          = symbol("SigButton");
-    g.SIGCHECKBOX        = symbol("SigCheckbox");
-    g.SIGWAVEFORM        = symbol("SigWaveform");
-    g.SIGHSLIDER         = symbol("SigHSlider");
-    g.SIGVSLIDER         = symbol("SigVSlider");
-    g.SIGNUMENTRY        = symbol("SigNumEntry");
-    g.SIGHBARGRAPH       = symbol("SigHBargraph");
-    g.SIGVBARGRAPH       = symbol("SigVBargraph");
-    g.SIGATTACH          = symbol("SigAttach");
-    g.SIGENABLE          = symbol("SigEnable");
-    g.SIGCONTROL         = symbol("SigControl");
-    g.SIGSOUNDFILE       = symbol("SigSoundfile");
-    g.SIGSOUNDFILELENGTH = symbol("SigSoundfileLength");
-    g.SIGSOUNDFILERATE   = symbol("SigSoundfileRate");
-    g.SIGSOUNDFILEBUFFER = symbol("SigSoundfileBuffer");
-    g.SIGREGISTER        = symbol("SigRegister");
-    g.SIGTUPLE           = symbol("SigTuple");
-    g.SIGTUPLEACCESS     = symbol("SigTupleAccess");
-    g.SIGFIR             = symbol("SigFIR");
-    g.SIGIIR             = symbol("SigIIR");
-    g.SIGSUM             = symbol("SigSum");
-    g.SIGTEMPVAR         = symbol("SigTempVar");
-    g.SIGPERMVAR         = symbol("SigPermVar");
-    g.SIGZEROPAD         = symbol("SigZeroPad");
-    g.SIGSEQ             = symbol("SigSeq");
-    g.SIGOD              = symbol("SigOD");
-    g.SIGUS              = symbol("SigUS");
-    g.SIGDS              = symbol("SigDS");
-    g.SIGCLOCKED         = symbol("SigClocked");
+    g.FFUN = symbol("ForeignFunction");
+    initSignalSymbols();
+
+    // Type constructors and property keys belong to other internal languages,
+    // so they deliberately remain ordinary symbols in this migration.
     g.SIMPLETYPE         = symbol("SimpleType");
     g.TABLETYPE          = symbol("TableType");
     g.TUPLETTYPE         = symbol("TupletType");
