@@ -61,14 +61,6 @@ class interval {
 
     interval(double n, double m, int lsb = -24) noexcept
     {
-        if (n == 0.0 && m == 0.0) {
-            fLo  = 0.0;
-            fHi  = 0.0;
-            fLSB = 0;
-            // std::cerr << "Warning: creating an interval with both bounds equal to zero."
-            //           << std::endl;
-            return;
-        }
         if (lsb == INT_MIN) {
             fLSB = -24;
         } else {
@@ -84,27 +76,7 @@ class interval {
         }
     }
 
-    explicit interval(double x) noexcept
-    {
-        if (x == 0) {
-            fLo  = 0;
-            fHi  = 0;
-            fLSB = 0;
-        } else {
-            // compute the preficion needed to represent x
-            // in the form x = 2^p * y, where y is an integer
-            int    p = 0;
-            double y = x;
-            double ipart;
-            while (std::modf(y, &ipart) != 0.0) {
-                y *= 2.0;
-                p--;
-            }
-            fLo  = x;
-            fHi  = x;
-            fLSB = p;
-        }
-    }
+    explicit interval(double n) noexcept : interval(n, n) {}
 
     // interval(const interval& r) : fEmpty(r.empty()), fLo(r.lo()), fHi(r.hi())
     // {}
@@ -184,7 +156,7 @@ class interval {
 inline std::ostream& operator<<(std::ostream& dst, const interval& i)
 {
     if (i.isEmpty()) {
-        return dst << "empty()";
+        return dst << "interval()";
     } else {
         return dst << "interval(" << i.lo() << ',' << i.hi() << ',' << i.lsb() << ")";
     }
@@ -197,17 +169,6 @@ inline std::ostream& operator<<(std::ostream& dst, const interval& i)
 inline interval empty() noexcept
 {
     return {NAN, NAN, 0};
-}
-
-/**
- * Return the interval containing every finite value representable by a double.
- *
- * This is the explicit equivalent of the historical default constructor. It
- * does not contain positive or negative infinity.
- */
-inline interval fullFinite(int lsb = -24) noexcept
-{
-    return {std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), lsb};
 }
 
 inline interval intersection(const interval& i, const interval& j)

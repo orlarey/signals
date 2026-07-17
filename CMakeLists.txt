@@ -20,19 +20,18 @@ else()
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 endif()
 
-# The copy units (signals/, Dependencies/) and the vendored dependencies
-# (tlib/, interval/, FaustAlgebra/, DirectedGraph/). CONFIGURE_DEPENDS keeps
-# the source list in sync with the directories (the interval standalone
-# project taught us the cost of a stale explicit list).
+# The copy unit (signals/) and the vendored dependencies (tlib/, interval/,
+# FaustAlgebra/). This master-dev lineage carries no Dependencies/ or
+# DirectedGraph/ (those belong to the FIR18 lineage, on branch fir18).
+# CONFIGURE_DEPENDS keeps the source list in sync with the directories (the
+# interval standalone project taught us the cost of a stale explicit list).
 file(GLOB SIGNALS_SRC   CONFIGURE_DEPENDS signals/*.cpp)
-file(GLOB DEPS_SRC      CONFIGURE_DEPENDS Dependencies/*.cpp)
 file(GLOB TLIB_SRC      CONFIGURE_DEPENDS tlib/*.cpp)
 file(GLOB INTERVAL_SRC  CONFIGURE_DEPENDS interval/*.cpp)
 
 # the library
 add_library(signals STATIC
     ${SIGNALS_SRC}
-    ${DEPS_SRC}
     ${TLIB_SRC}
     ${INTERVAL_SRC})
 
@@ -41,8 +40,6 @@ add_library(signals STATIC
 target_include_directories(signals PUBLIC
     .
     signals
-    Dependencies
-    DirectedGraph
     interval
     FaustAlgebra
     tlib)

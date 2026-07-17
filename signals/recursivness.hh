@@ -25,21 +25,21 @@
 #include "signals.hh"
 
 /**
- * Annotate a signal with recursiveness information, the amount of
+ * Annotate a signal with recursivness information, the amount of
  * recursive dependencies of a signal. Should be used before
- * calling getRecursiveness.
+ * calling getRecursivness.
  * @param sig signal to annotate
  */
-void recursivenessAnnotation(Tree sig);
+void recursivnessAnnotation(Tree sig);
 
 /**
- * Return the recursiveness of a previously
+ * Return the recursivness of a previously
  * annotated signal. An error is generated
- * if the signal has no recursiveness property.
+ * if the signal has no recursivness property.
  * @param sig signal
- * @return recursiveness of the signal
+ * @return recursivness of the signal
  */
-int getRecursiveness(Tree t);
+int getRecursivness(Tree t);
 
 /**
  * Return the set of recursive symbols appearing in a signal.
@@ -47,12 +47,5 @@ int getRecursiveness(Tree t);
  * @return the set of symbols
  */
 Tree symlist(Tree sig);
-
-/**
- * Clear recursiveness annotations from a signal tree.
- * This allows re-annotation after signal transformations.
- * @param sig signal tree to clear
- */
-void clearRecursivenessAnnotations(Tree sig);
 
 #endif

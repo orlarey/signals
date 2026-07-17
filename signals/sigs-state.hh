@@ -19,16 +19,13 @@
  ************************************************************************
  ************************************************************************/
 
-
 /** \file sigs-state.hh
  * State of the signal library.
  *
  * Storage for the symbols, property keys, type singletons, session state,
  * options and extended-primitive registry of the signal library. The Faust
  * compiler binds the corresponding members of 'global' as references to this
- * state, so every existing gGlobal-> read and write (defaults, option
- * parsing, symbol interning, per-session resets) keeps working unchanged
- * while the library files access sigs::g directly.
+ * state, so every existing gGlobal-> read and write keeps working unchanged.
  */
 
 #ifndef __SIGS_STATE__
@@ -50,10 +47,9 @@ class xtended;
 namespace sigs {
 
 struct State {
-    int                                         gMaxFIRSize{};              // -mfs threshold
-    int                                         gFloatSize{};               // -single/double/quad/fx option (1 for 'float', 2
-    int                                         gWideningLimit{};    // Max number of iterations before interval widening
-    int                                         gNarrowingLimit{};   // Max number of iterations to compute interval widener
+    int                                         gFloatSize{};  // -single/double/quad/fx option (1 for 'float', 2 for 'double', 3 for 'quad',
+    int                                         gWideningLimit{};   // Max number of iterations before interval widening
+    int                                         gNarrowingLimit{};  // Max number of iterations to compute interval widener
     Tabber                                      TABBER{};
     std::map<Tree, std::pair<int, std::string>> gSignalTable{};
     int                                         gSignalCounter{};
@@ -62,18 +58,15 @@ struct State {
     int                                         gCountMaximal{};
     int                                         gAllocationCount{};  // Internal signal types counter
     bool                                        gCausality{};  // FIXME: global used as a parameter of typeAnnotation when true trigs
-    int                                         gSTEP{};        // counter for unique compilation step number
     Tree                                        ORDERPROP{};
     Tree                                        RECURSIVNESS{};
     Tree                                        NULLTYPEENV{};
-    Tree                                        CLKENVPROPERTY{};
     xtended*                                    gAbsPrim{};
     xtended*                                    gAcosPrim{};
     xtended*                                    gTanPrim{};
     xtended*                                    gSqrtPrim{};
     xtended*                                    gSinPrim{};
     xtended*                                    gRintPrim{};
-    xtended*                                    gRoundPrim{};
     xtended*                                    gRemainderPrim{};
     xtended*                                    gPowPrim{};
     xtended*                                    gMinPrim{};
@@ -133,17 +126,6 @@ struct State {
     Sym                                         SIGREGISTER{};  // for FPGA Retiming
     Sym                                         SIGTUPLE{};
     Sym                                         SIGTUPLEACCESS{};
-    Sym                                         SIGFIR{};
-    Sym                                         SIGIIR{};
-    Sym                                         SIGSUM{};
-    Sym                                         SIGTEMPVAR{};
-    Sym                                         SIGPERMVAR{};
-    Sym                                         SIGZEROPAD{};
-    Sym                                         SIGSEQ{};
-    Sym                                         SIGOD{};
-    Sym                                         SIGUS{};
-    Sym                                         SIGDS{};
-    Sym                                         SIGCLOCKED{};
     Sym                                         SIMPLETYPE{};
     Sym                                         TABLETYPE{};
     Sym                                         TUPLETTYPE{};

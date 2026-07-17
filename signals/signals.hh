@@ -2,7 +2,6 @@
  ************************************************************************
     FAUST compiler
     Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
-    Copyright (C) 2023-2024 INRIA
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -335,58 +334,6 @@ SIGS_API Tree sigRegister(int n, Tree s);
 SIGS_API bool isSigRegister(Tree s, int* n, Tree& x);
 
 /*****************************************************************************
-                             FIR and IIR
-*****************************************************************************/
-SIGS_API Tree sigFIR(const tvec& sigcoefs);
-SIGS_API bool isSigFIR(Tree s);
-SIGS_API bool isSigFIR(Tree s, Tree c0);  // true if s is a FIR on signal c0
-SIGS_API bool isSigFIR(Tree s, tvec& sigcoefs);
-
-SIGS_API Tree sigIIR(const tvec& sigcoefs);
-SIGS_API bool isSigIIR(Tree s);
-SIGS_API bool isSigIIR(Tree s, Tree c0);  // true if s is a IIR on signal c0
-SIGS_API bool isSigIIR(Tree s, tvec& sigcoefs);
-
-SIGS_API Tree sigSum(const tvec& sigsubs);
-SIGS_API bool isSigSum(Tree s);
-SIGS_API bool isSigSum(Tree s, tvec& sigsubs);
-
-SIGS_API Tree sigTempVar(Tree s);
-SIGS_API bool isSigTempVar(Tree s);
-SIGS_API bool isSigTempVar(Tree s, Tree& x);
-
-SIGS_API Tree sigPermVar(Tree s);
-SIGS_API bool isSigPermVar(Tree s);
-SIGS_API bool isSigPermVar(Tree s, Tree& x);
-
-SIGS_API Tree sigZeroPad(Tree s, Tree n);
-SIGS_API bool isSigZeroPad(Tree s);
-SIGS_API bool isSigZeroPad(Tree s, Tree& x, Tree& n);
-
-SIGS_API Tree sigSeq(Tree x, Tree y);
-SIGS_API bool isSigSeq(Tree s);
-SIGS_API bool isSigSeq(Tree s, Tree& x, Tree& y);
-
-SIGS_API Tree sigOD(const tvec& sigsubs);
-SIGS_API bool isSigOD(Tree s);
-SIGS_API bool isSigOD(Tree s, tvec& sigsubs);
-
-SIGS_API Tree sigUS(const tvec& sigsubs);
-SIGS_API bool isSigUS(Tree s);
-SIGS_API bool isSigUS(Tree s, tvec& sigsubs);
-
-SIGS_API Tree sigDS(const tvec& sigsubs);
-SIGS_API bool isSigDS(Tree s);
-SIGS_API bool isSigDS(Tree s, tvec& sigsubs);
-
-SIGS_API Tree sigClocked(Tree h, Tree y);
-SIGS_API bool isSigClocked(Tree s);
-SIGS_API bool isSigClocked(Tree s, Tree& h, Tree& y);
-SIGS_API bool hasClock(Tree s, Tree& clock);
-
-SIGS_API Tree sigDoubleClocked(Tree insideclkenv, Tree outsideclkenv, Tree y);
-
-/*****************************************************************************
                              Matrix extension
 *****************************************************************************/
 
@@ -407,8 +354,7 @@ Tree sigCartesianProd(Tree s1, Tree s2);
                              Access to sub signals of a signal
 *****************************************************************************/
 
-int  getSubSignals(Tree sig, tvec& vsigs, bool visitgen = true);
-Tree setSubSignals(Tree sig, const tvec& vsigs, bool visitgen = true);
+int getSubSignals(Tree sig, tvec& vsigs, bool visitgen = true);
 
 /**
  * Test if exp is very simple that is it
@@ -433,45 +379,5 @@ Tree listConvert(const siglist& a);
  * Convert a Tree in stl vector of signals
  */
 siglist treeConvert(Tree t);
-
-/**
- * Compute the 'density' of a FIR filter given its coefficients.
- * It is the ratio of non zero coefficients over the total number of coefficients.
- * The total number of coefficients is the size of the array minus the position of the first
- * non zero coefficient.
- */
-float computeDensity(const tvec& coefs);
-
-// Operations to create and access clock environments (HE)
-// HE ::= nil | (HE, slotenv, path, box, sig1, sig2, ...)
-// Box is encoded as a prim0
-// slotenv is the slot environment
-// path is the UI group path
-// sig1, sig2, ... are the input signals of the box
-// sig1 is typically the clock signal
-
-Tree makeClockEnv(Tree clockenv, Tree slotenv, Tree path, Sym kind, Tree box,
-                  const siglist& lsig);
-Tree getClockenvClock(Tree clkenv);
-Tree getClockenvSlotenv(Tree clkenv);
-Tree getClockenvPath(Tree clkenv);
-bool isODClockenv(Tree clkenv);
-bool isUSClockenv(Tree clkenv);
-bool isDSClockenv(Tree clkenv);
-Tree getClockenvBox(Tree clkenv);
-Sym  getClockenvKind(Tree clkenv);  // SIGOD, SIGUS, SIGDS or nullptr
-Tree getClockenvEnv(Tree clkenv);
-
-Tree recTempVar(Tree clkenv1, Tree clkenv2, Tree sig);
-
-// Projection utilities
-
-bool hasProjDefinition(
-    Tree sig, Tree& def);  ///< test if sig is a recursive projection and get its definition
-Tree setProjDefinition(
-    Tree sig,
-    Tree newDef);  ///< create new projection with modified definition (asserts if not projection)
-
-std::string getProjName(Tree sig);
 
 #endif

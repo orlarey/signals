@@ -9,7 +9,7 @@ namespace itv {
 /**
  * @brief Computes the minimum of four doubles
  */
-inline double min4(double a, double b, double c, double d)
+static double min4(double a, double b, double c, double d)
 {
     return std::min(std::min(a, b), std::min(c, d));
 }
@@ -17,7 +17,7 @@ inline double min4(double a, double b, double c, double d)
 /**
  * @brief Computes the maximum of four doubles
  */
-inline double max4(double a, double b, double c, double d)
+static double max4(double a, double b, double c, double d)
 {
     return std::max(std::max(a, b), std::max(c, d));
 }
@@ -25,7 +25,7 @@ inline double max4(double a, double b, double c, double d)
 /**
  * @brief Computes the minimum of four ints
  */
-inline double min4(int a, int b, int c, int d)
+static double min4(int a, int b, int c, int d)
 {
     return std::min(std::min(a, b), std::min(c, d));
 }
@@ -33,7 +33,7 @@ inline double min4(int a, int b, int c, int d)
 /**
  * @brief Computes the maximum of four ints
  */
-inline double max4(int a, int b, int c, int d)
+static double max4(int a, int b, int c, int d)
 {
     return std::max(std::max(a, b), std::max(c, d));
 }
@@ -41,7 +41,7 @@ inline double max4(int a, int b, int c, int d)
 /**
  * @brief Computes the value with minimum absolute value among the bounds of an interval
  */
-inline double minValAbs(interval x)
+static double minValAbs(interval x)
 {
     if (std::abs(x.lo()) < std::abs(x.hi())) {
         return x.lo();
@@ -52,7 +52,7 @@ inline double minValAbs(interval x)
 /**
  * @brief Computes the value with maximum absolute value
  */
-inline double maxValAbs(interval x)
+static double maxValAbs(interval x)
 {
     if (std::abs(x.lo()) < std::abs(x.hi())) {
         return x.hi();
@@ -64,7 +64,7 @@ inline double maxValAbs(interval x)
  * @brief Computes the direction of the interior of the interval at the minimum absolute value of
  * its bounds
  */
-inline int signMinValAbs(interval x)
+static int signMinValAbs(interval x)
 {
     if (std::abs(x.lo()) < std::abs(x.hi())) {
         return 1;
@@ -76,7 +76,7 @@ inline int signMinValAbs(interval x)
  * @brief Computes the direction of the interior of the interval at the maximum absolute value of
  * its bounds
  */
-inline int signMaxValAbs(interval x)
+static int signMaxValAbs(interval x)
 {
     if (std::abs(x.lo()) < std::abs(x.hi())) {
         return -1;

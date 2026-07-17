@@ -35,40 +35,28 @@
 #include <string>
 
 #include "sigs-export.hh"
-#include "tree.hh"
 
 namespace sigs {
 
-/// Standalone initialization of the library state (symbols, property keys,
-/// type singletons, session state, option defaults). The Faust compiler
-/// does NOT call it (global.cpp performs the same writes in its own order);
-/// standalone hosts call it after tlib::init(), once per session.
+/// Interns the signal constructors AND registers them in the Signal
+/// signature (sigOpcode.hh), so each carries a dense opcode. The Faust
+/// compiler calls this from global.cpp instead of interning the SIG*
+/// symbols by hand; it fills the sigs::g.SIG* members.
+SIGS_API void initSignalSymbols();
+
+/// Standalone initialization of the whole signal library state (symbols,
+/// property keys, type singletons, session state, option defaults). The
+/// Faust compiler does NOT call it (global.cpp performs the same writes in
+/// its own order); standalone hosts call it after tlib::init(), once per
+/// session.
 SIGS_API void init();
-
-/// Simplifies (normalizes) a signal expression; used by the FIR/IIR analyses.
-using Simplifier = Tree (*)(Tree);
-
-/// Install a custom simplifier; nullptr restores the default (identity).
-/// Returns the previously installed simplifier. The Faust compiler installs
-/// the simplify() function of its normalization module.
-SIGS_API Simplifier setSimplifier(Simplifier f);
-
-/// Simplify a signal expression through the installed simplifier.
-SIGS_API Tree simplify(Tree sig);
-
-/// Detects whether a signal contains a sigClocked node (and returns its
-/// clock); used by the FIR analysis. The Faust compiler installs its
-/// SignalClockChecker-based implementation; the default is a plain
-/// depth-first scan.
-using ClockChecker = bool (*)(Tree sig, Tree& clock);
-SIGS_API ClockChecker setClockChecker(ClockChecker f);
 
 /// Formats a real number when pretty-printing signals (ppsig).
 using RealPrinter = std::string (*)(double);
 
-/// Install a custom real printer; nullptr restores the default
-/// (shortest round-trip "%g" form, with a trailing ".0" when needed).
-/// Returns the previously installed printer.
+/// Install a custom real printer; nullptr restores the default (shortest
+/// round-trip "%g" form, with a trailing ".0" when needed). Returns the
+/// previously installed printer.
 SIGS_API RealPrinter setRealPrinter(RealPrinter p);
 
 /// Format a real number through the installed printer.

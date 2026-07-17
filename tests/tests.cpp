@@ -84,26 +84,6 @@ int main()
     check(t->getInterval().lo() >= -0.5 && t->getInterval().hi() <= 1.5,
           "interval: product bounded by [-0.5, 1.5]");
 
-    // --- recursive pretty-printing ----------------------------------------
-    Tree recVar  = tree("R");
-    Tree recBody = cons(sigAdd(sigInput(0), ref(recVar)), ::nil());
-    Tree recSig  = sigProj(0, rec(recVar, recBody));
-    std::ostringstream recOut;
-    recOut << ppsig(recSig);
-    check(recOut.str() == "proj0(R)\nwith {\n  R := (+(IN[0],R))\n}",
-          "ppsig: symbolic recursion is printed as a trailing definition: " + recOut.str());
-
-    Tree nestedVar  = tree("S");
-    Tree nestedBody = cons(sigAdd(ref(recVar), ref(nestedVar)), ::nil());
-    Tree nestedRec  = sigProj(0, rec(nestedVar, nestedBody));
-    Tree outerBody  = cons(sigAdd(ref(recVar), nestedRec), ::nil());
-    Tree nestedSig  = sigProj(0, rec(recVar, outerBody));
-    std::ostringstream nestedOut;
-    nestedOut << ppsig(nestedSig);
-    check(nestedOut.str() ==
-              "proj0(R)\nwith {\n  R := (+(R,proj0(S)))\n  S := (+(R,S))\n}",
-          "ppsig: nested recursive definitions are collected once: " + nestedOut.str());
-
     // --- integer signals ----------------------------------------------------
     Tree n = sigAdd(sigInt(1), sigInt(2));
     typeAnnotation(n, false);

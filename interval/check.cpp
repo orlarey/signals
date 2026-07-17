@@ -23,19 +23,6 @@
 #include "interval_algebra.hh"
 #include "precision_utils.hh"
 
-namespace {
-int gCheckCount   = 0;
-int gCheckFailure = 0;
-
-void recordCheck(bool success)
-{
-    ++gCheckCount;
-    if (!success) {
-        ++gCheckFailure;
-    }
-}
-}  // namespace
-
 /**
  * @brief check we have the expected interval
  *
@@ -46,9 +33,7 @@ void check(const std::string& expected, const itv::interval& exp)
 {
     std::stringstream ss;
     ss << exp;
-    bool success = ss.str().compare(expected) == 0;
-    recordCheck(success);
-    if (success) {
+    if (ss.str().compare(expected) == 0) {
         std::cout << "\033[32m"
                   << "OK: " << expected << "\033[0m" << std::endl;
     } else {
@@ -67,9 +52,7 @@ void check(const std::string& expected, const itv::interval& exp)
  */
 void check(const std::string& testname, const itv::interval& exp, const itv::interval& res)
 {
-    bool success = exp == res;
-    recordCheck(success);
-    if (success) {
+    if (exp == res) {
         std::cout << "\033[32m"
                   << "OK: " << testname << " " << exp << " = " << res << "\033[0m" << std::endl;
         if (exp.lsb() != res.lsb()) {
@@ -84,21 +67,6 @@ void check(const std::string& testname, const itv::interval& exp, const itv::int
     }
 }
 
-void checkExact(const std::string& testname, const itv::interval& actual,
-                const itv::interval& expected)
-{
-    bool success = (actual == expected) && (actual.lsb() == expected.lsb());
-    recordCheck(success);
-    if (success) {
-        std::cout << "\033[32m"
-                  << "OK: " << testname << " " << actual << "\033[0m" << std::endl;
-    } else {
-        std::cout << "\033[31m"
-                  << "ERR: " << testname << " FAILED. We got " << actual << " instead of "
-                  << expected << "\033[0m" << std::endl;
-    }
-}
-
 /**
  * @brief check that a boolean result is the expected one
  *
@@ -108,9 +76,7 @@ void checkExact(const std::string& testname, const itv::interval& actual,
  */
 void check(const std::string& testname, bool exp, bool res)
 {
-    bool success = exp == res;
-    recordCheck(success);
-    if (success) {
+    if (exp == res) {
         std::cout << "\033[32m"
                   << "OK: " << testname << "\033[0m" << std::endl;
     } else {
@@ -118,16 +84,6 @@ void check(const std::string& testname, bool exp, bool res)
                   << "ERR:" << testname << " FAILED. We got " << exp << " instead of " << res
                   << "\033[0m" << std::endl;
     }
-}
-
-int reportCheckResults()
-{
-    if (gCheckFailure == 0) {
-        std::cout << "\nAll " << gCheckCount << " checks passed." << std::endl;
-        return 0;
-    }
-    std::cout << "\n" << gCheckFailure << " of " << gCheckCount << " checks failed." << std::endl;
-    return 1;
 }
 
 /**
@@ -141,7 +97,8 @@ int reportCheckResults()
  */
 itv::interval testfun(int N, bfun f, const itv::interval& x, const itv::interval& y)
 {
-    std::default_random_engine     generator(0x49545601u);
+    std::random_device rd;  // used to generate a random seed, based on some hardware randomness
+    std::default_random_engine     generator(rd());
     std::uniform_real_distribution rx(x.lo(), x.hi());
     std::uniform_real_distribution ry(y.lo(), y.hi());
 
@@ -195,7 +152,8 @@ void analyzemod(itv::interval x, itv::interval y)
  */
 void analyzeUnaryFunction(int E, int M, const char* title, const itv::interval& D, ufun f)
 {
-    std::default_random_engine     generator(0x49545602u);
+    std::random_device R;  // used to generate a random seed, based on some hardware randomness
+    std::default_random_engine     generator(R());
     std::uniform_real_distribution rd(D.lo(), D.hi());
 
     std::cout << "Analysis of " << title << " in domain " << D << std::endl;
@@ -244,7 +202,8 @@ void analyzeUnaryFunction(int E, int M, const char* title, const itv::interval& 
  */
 void analyzeUnaryMethod(int E, int M, const char* title, const itv::interval& D, ufun f, umth mp)
 {
-    std::default_random_engine     generator(0x49545603u);
+    std::random_device R;  // used to generate a random seed, based on some hardware randomness
+    std::default_random_engine     generator(R());
     std::uniform_real_distribution rd(D.lo(), D.hi());
     itv::interval_algebra          A;
 
@@ -358,7 +317,8 @@ void analyzeUnaryMethod(int E, int M, const char* title, const itv::interval& D,
 void analyzeBinaryMethod(int E, int M, const char* title, const itv::interval& Dx,
                          const itv::interval& Dy, bfun f, bmth bm)
 {
-    std::default_random_engine     generator(0x49545604u);
+    std::random_device R;  // used to generate a random seed, based on some hardware randomness
+    std::default_random_engine     generator(R());
     std::uniform_real_distribution rdx(Dx.lo(), Dx.hi());
     std::uniform_real_distribution rdy(Dy.lo(), Dy.hi());
     itv::interval_algebra          A;

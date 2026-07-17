@@ -21,113 +21,112 @@
 
 #include "sigs-config.hh"
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
 #include "interval.hh"
-#include "signals.hh"
-#include "sigs-state.hh"
+#include "sigOpcode.hh"
 #include "sigtype.hh"
 
 // The interval algebra used by the signal type system (declared in
 // signals/interval.hh)
 itv::interval_algebra gAlgebra;
+#include "sigs-state.hh"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
 
 namespace sigs {
 
+void initSignalSymbols()
+{
+    const Signature signal_signature = signalSignature();
+
+    // Every SIG* symbol is a constructor of the Signal language. Keeping
+    // these add() calls in SignalOpcode declaration order makes their dense
+    // local opcodes usable directly by folds without a translation table.
+    g.SIGINPUT           = signal_signature.add("SigInput");
+    g.SIGOUTPUT          = signal_signature.add("SigOutput");
+    g.SIGDELAY1          = signal_signature.add("SigDelay1");
+    g.SIGDELAY           = signal_signature.add("SigDelay");
+    g.SIGPREFIX          = signal_signature.add("SigPrefix");
+    g.SIGRDTBL           = signal_signature.add("SigRDTbl");
+    g.SIGWRTBL           = signal_signature.add("SigWRTbl");
+    g.SIGGEN             = signal_signature.add("SigGen");
+    g.SIGDOCONSTANTTBL   = signal_signature.add("SigDocConstantTbl");
+    g.SIGDOCWRITETBL     = signal_signature.add("SigDocWriteTbl");
+    g.SIGDOCACCESSTBL    = signal_signature.add("SigDocAccessTbl");
+    g.SIGSELECT2         = signal_signature.add("SigSelect2");
+    g.SIGASSERTBOUNDS    = signal_signature.add("sigAssertBounds");
+    g.SIGHIGHEST         = signal_signature.add("sigHighest");
+    g.SIGLOWEST          = signal_signature.add("sigLowest");
+    g.SIGBINOP           = signal_signature.add("SigBinOp");
+    g.SIGFFUN            = signal_signature.add("SigFFun");
+    g.SIGFCONST          = signal_signature.add("SigFConst");
+    g.SIGFVAR            = signal_signature.add("SigFVar");
+    g.SIGPROJ            = signal_signature.add("SigProj");
+    g.SIGINTCAST         = signal_signature.add("SigIntCast");
+    g.SIGBITCAST         = signal_signature.add("SigBitCast");
+    g.SIGFLOATCAST       = signal_signature.add("SigFloatCast");
+    g.SIGBUTTON          = signal_signature.add("SigButton");
+    g.SIGCHECKBOX        = signal_signature.add("SigCheckbox");
+    g.SIGWAVEFORM        = signal_signature.add("SigWaveform");
+    g.SIGHSLIDER         = signal_signature.add("SigHSlider");
+    g.SIGVSLIDER         = signal_signature.add("SigVSlider");
+    g.SIGNUMENTRY        = signal_signature.add("SigNumEntry");
+    g.SIGHBARGRAPH       = signal_signature.add("SigHBargraph");
+    g.SIGVBARGRAPH       = signal_signature.add("SigVBargraph");
+    g.SIGATTACH          = signal_signature.add("SigAttach");
+    g.SIGENABLE          = signal_signature.add("SigEnable");
+    g.SIGCONTROL         = signal_signature.add("SigControl");
+    g.SIGSOUNDFILE       = signal_signature.add("SigSoundfile");
+    g.SIGSOUNDFILELENGTH = signal_signature.add("SigSoundfileLength");
+    g.SIGSOUNDFILERATE   = signal_signature.add("SigSoundfileRate");
+    g.SIGSOUNDFILEBUFFER = signal_signature.add("SigSoundfileBuffer");
+    g.SIGREGISTER        = signal_signature.add("SigRegister");
+    g.SIGTUPLE           = signal_signature.add("SigTuple");
+    g.SIGTUPLEACCESS     = signal_signature.add("SigTupleAccess");
+}
+
 /**
- * Standalone initialization of the library state: symbols, property keys,
- * type singletons, session state and option defaults. NOT called by the
- * Faust compiler, which performs the same writes itself in global.cpp (in
- * its own, order-sensitive sequence); intended for standalone hosts and
- * tests. Requires tlib::init() first. Can be called again between two
- * sessions (after tlib::init()).
+ * Standalone initialization of the signal library state: signal symbols,
+ * property keys, type singletons, session state and option defaults. NOT
+ * called by the Faust compiler, which performs the same writes itself in
+ * global.cpp (in its own, order-sensitive sequence); intended for standalone
+ * hosts and tests. Requires tlib::init() first, and can be called again
+ * between two sessions.
  */
 void init()
 {
-    // Symbols (same names as in global.cpp)
-    g.FFUN               = symbol("ForeignFunction");
-    g.SIGINPUT           = symbol("SigInput");
-    g.SIGOUTPUT          = symbol("SigOutput");
-    g.SIGDELAY1          = symbol("SigDelay1");
-    g.SIGDELAY           = symbol("SigDelay");
-    g.SIGPREFIX          = symbol("SigPrefix");
-    g.SIGRDTBL           = symbol("SigRDTbl");
-    g.SIGWRTBL           = symbol("SigWRTbl");
-    g.SIGGEN             = symbol("SigGen");
-    g.SIGDOCONSTANTTBL   = symbol("SigDocConstantTbl");
-    g.SIGDOCWRITETBL     = symbol("SigDocWriteTbl");
-    g.SIGDOCACCESSTBL    = symbol("SigDocAccessTbl");
-    g.SIGSELECT2         = symbol("SigSelect2");
-    g.SIGASSERTBOUNDS    = symbol("sigAssertBounds");
-    g.SIGHIGHEST         = symbol("sigHighest");
-    g.SIGLOWEST          = symbol("sigLowest");
-    g.SIGBINOP           = symbol("SigBinOp");
-    g.SIGFFUN            = symbol("SigFFun");
-    g.SIGFCONST          = symbol("SigFConst");
-    g.SIGFVAR            = symbol("SigFVar");
-    g.SIGPROJ            = symbol("SigProj");
-    g.SIGINTCAST         = symbol("SigIntCast");
-    g.SIGBITCAST         = symbol("SigBitCast");
-    g.SIGFLOATCAST       = symbol("SigFloatCast");
-    g.SIGBUTTON          = symbol("SigButton");
-    g.SIGCHECKBOX        = symbol("SigCheckbox");
-    g.SIGWAVEFORM        = symbol("SigWaveform");
-    g.SIGHSLIDER         = symbol("SigHSlider");
-    g.SIGVSLIDER         = symbol("SigVSlider");
-    g.SIGNUMENTRY        = symbol("SigNumEntry");
-    g.SIGHBARGRAPH       = symbol("SigHBargraph");
-    g.SIGVBARGRAPH       = symbol("SigVBargraph");
-    g.SIGATTACH          = symbol("SigAttach");
-    g.SIGENABLE          = symbol("SigEnable");
-    g.SIGCONTROL         = symbol("SigControl");
-    g.SIGSOUNDFILE       = symbol("SigSoundfile");
-    g.SIGSOUNDFILELENGTH = symbol("SigSoundfileLength");
-    g.SIGSOUNDFILERATE   = symbol("SigSoundfileRate");
-    g.SIGSOUNDFILEBUFFER = symbol("SigSoundfileBuffer");
-    g.SIGREGISTER        = symbol("SigRegister");
-    g.SIGTUPLE           = symbol("SigTuple");
-    g.SIGTUPLEACCESS     = symbol("SigTupleAccess");
-    g.SIGFIR             = symbol("SigFIR");
-    g.SIGIIR             = symbol("SigIIR");
-    g.SIGSUM             = symbol("SigSum");
-    g.SIGTEMPVAR         = symbol("SigTempVar");
-    g.SIGPERMVAR         = symbol("SigPermVar");
-    g.SIGZEROPAD         = symbol("SigZeroPad");
-    g.SIGSEQ             = symbol("SigSeq");
-    g.SIGOD              = symbol("SigOD");
-    g.SIGUS              = symbol("SigUS");
-    g.SIGDS              = symbol("SigDS");
-    g.SIGCLOCKED         = symbol("SigClocked");
-    g.SIMPLETYPE         = symbol("SimpleType");
-    g.TABLETYPE          = symbol("TableType");
-    g.TUPLETTYPE         = symbol("TupletType");
+    // Signal constructors (interned and registered in the Signal signature)
+    initSignalSymbols();
+
+    // Foreign function head and type constructors (ordinary symbols)
+    g.FFUN       = symbol("ForeignFunction");
+    g.SIMPLETYPE = symbol("SimpleType");
+    g.TABLETYPE  = symbol("TableType");
+    g.TUPLETTYPE = symbol("TupletType");
 
     // Property keys
-    g.ORDERPROP      = tree(symbol("OrderProp"));
-    g.RECURSIVNESS   = tree(symbol("RecursivenessProp"));
-    g.NULLTYPEENV    = tree(symbol("NullTypeEnv"));
-    g.CLKENVPROPERTY = tree(symbol("CLKENVPROPERTY"));
+    g.ORDERPROP    = tree(symbol("OrderProp"));
+    g.RECURSIVNESS = tree(symbol("RecursivnessProp"));
+    g.NULLTYPEENV  = tree(symbol("NullTypeEnv"));
 
     // Session state
     g.TABBER = Tabber(1);
     g.gSignalTable.clear();
     g.gSignalTrace.clear();
-    g.gSignalCounter    = 0;
-    g.gCountInferences  = 0;
-    g.gCountMaximal     = 0;
-    g.gAllocationCount  = 0;
-    g.gSTEP             = 1;
-    g.gSymListProp      = new property<Tree>();
-    g.gMemoizedTypes    = new property<AudioType*>();
+    g.gSignalCounter   = 0;
+    g.gCountInferences = 0;
+    g.gCountMaximal    = 0;
+    g.gAllocationCount = 0;
+    g.gSymListProp     = new property<Tree>();
+    g.gMemoizedTypes   = new property<AudioType*>();
 
     // Option defaults (same values as global.cpp)
-    g.gCausality       = false;
-    g.gWideningLimit   = 0;
-    g.gNarrowingLimit  = 0;
-    g.gMaxFIRSize      = 1024;
-    g.gFloatSize       = 1;
+    g.gCausality      = false;
+    g.gWideningLimit  = 0;
+    g.gNarrowingLimit = 0;
+    g.gFloatSize      = 1;
 
     // Extended primitive registry: empty in standalone mode (the concrete
     // primitives carry code generation and live in the compiler)
@@ -153,55 +152,11 @@ void init()
     g.gSqrtPrim       = nullptr;
     g.gTanPrim        = nullptr;
 
-    // Type singletons (require gMemoizedTypes above)
+    // Type singletons (require the interval algebra and gMemoizedTypes above)
     g.TINPUT  = makeSimpleType(kReal, kSamp, kExec, kVect, kNum, interval(-1, 1));
     g.TGUI    = makeSimpleType(kReal, kBlock, kExec, kVect, kNum, interval());
     g.TREC    = makeSimpleType(kInt, kSamp, kInit, kScal, kNum, interval(0, 0));
     g.TRECMAX = makeSimpleType(kInt, kSamp, kInit, kScal, kNum, interval(-HUGE_VAL, HUGE_VAL));
-}
-
-// Default clock checker: depth-first scan for a sigClocked node, following
-// the same order as the compiler's SignalVisitor (branches left to right).
-static bool defaultClockChecker(Tree sig, Tree& clock)
-{
-    Tree exp;
-    if (isSigClocked(sig, clock, exp)) {
-        return true;
-    }
-    for (int i = 0; i < sig->arity(); i++) {
-        if (defaultClockChecker(sig->branch(i), clock)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static ClockChecker gClockChecker = defaultClockChecker;
-
-ClockChecker setClockChecker(ClockChecker f)
-{
-    ClockChecker old = gClockChecker;
-    gClockChecker    = (f != nullptr) ? f : defaultClockChecker;
-    return old;
-}
-
-static Tree defaultSimplifier(Tree sig)
-{
-    return sig;
-}
-
-static Simplifier gSimplifier = defaultSimplifier;
-
-Simplifier setSimplifier(Simplifier f)
-{
-    Simplifier old = gSimplifier;
-    gSimplifier    = (f != nullptr) ? f : defaultSimplifier;
-    return old;
-}
-
-Tree simplify(Tree sig)
-{
-    return gSimplifier(sig);
 }
 
 /**
@@ -238,9 +193,3 @@ std::string printReal(double n)
 }
 
 }  // namespace sigs
-
-// Declared in signals.hh; routes through the installed clock checker.
-bool hasClock(Tree sig, Tree& clock)
-{
-    return sigs::gClockChecker(sig, clock);
-}

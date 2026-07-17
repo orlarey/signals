@@ -34,8 +34,8 @@
 #include <stdio.h>
 
 #include "sharing.hh"
-#include "shlysis.hh"
 #include "sigtyperules.hh"
+#include "shlysis.hh"
 
 using namespace std;
 
@@ -48,7 +48,9 @@ using namespace std;
 *****************************************************************************/
 
 static void setSharingCount(Tree sig, Tree key, int count)
-{ setProperty(sig, key, tree(count)); }
+{
+    setProperty(sig, key, tree(count));
+}
 
 //------------------------------------------------------------------------------
 // Create a specific property key for the sharing count of subtrees of t

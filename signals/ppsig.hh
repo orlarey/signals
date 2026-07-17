@@ -48,9 +48,6 @@ class ppsig : public virtual Garbageable {
         : fSig(s), fEnv(env), fPriority(priority), fHideRecursion(false), fMaxSize(max_size)
     {
     }
-
-    // Note: fMaxSize now represents maximum recursion depth, not character count
-    // When depth reaches 0, the signal address is printed instead of recursing further
     virtual std::ostream& print(std::ostream& fout) const;
 
    protected:
@@ -65,12 +62,6 @@ class ppsig : public virtual Garbageable {
                                    Tree z, Tree zz) const;
     virtual std::ostream& printfun(std::ostream& fout, const std::string& funame, Tree x, Tree y,
                                    Tree z, Tree z2, Tree z3) const;
-    virtual std::ostream& printfun(std::ostream& fout, const std::string& funame,
-                                   const tvec& args) const;
-
-    virtual std::ostream& printfir(std::ostream& fout, const tvec& args) const;
-    virtual std::ostream& printiir(std::ostream& fout, const tvec& args) const;
-
     virtual std::ostream& printout(std::ostream& fout, int i, Tree x) const;
     virtual std::ostream& printlist(std::ostream& fout, Tree largs) const;
     virtual std::ostream& printff(std::ostream& fout, Tree ff, Tree largs) const;
@@ -110,7 +101,6 @@ class ppsigShared final : public ppsig {
                            Tree zz) const;
     std::ostream& printfun(std::ostream& fout, const std::string& funame, Tree x, Tree y, Tree z,
                            Tree z2, Tree z3) const;
-    std::ostream& printfun(std::ostream& fout, const std::string& funame, const tvec& args) const;
     std::ostream& printout(std::ostream& fout, int i, Tree x) const;
     std::ostream& printlist(std::ostream& fout, Tree largs) const;
     std::ostream& printff(std::ostream& fout, Tree ff, Tree largs) const;
@@ -140,17 +130,5 @@ class ppsigShared final : public ppsig {
 
     static void printIDs(std::ostream& fout, bool sort);
 };
-
-/**
- * @brief Pretty-print a clock environment (clkEnv) structure
- *
- * A clkEnv has the structure: cons(parent_clkenv, cons(box_address, input_signals_list))
- * This function prints it in a human-readable nested format.
- *
- * @param clkenv The clock environment to print
- * @param depth Maximum depth for printing signals (passed to ppsig)
- * @param out Output stream (default: std::cerr)
- */
-void ppclkenv(Tree clkenv, int depth = 6, std::ostream& out = std::cerr);
 
 #endif
