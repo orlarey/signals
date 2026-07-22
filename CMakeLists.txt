@@ -21,8 +21,9 @@ else()
 endif()
 
 # The copy unit (signals/) and the vendored dependencies (tlib/, interval/,
-# FaustAlgebra/). This master-dev lineage carries no Dependencies/ or
-# DirectedGraph/ (those belong to the FIR18 lineage, on branch fir18).
+# FaustAlgebra/, DirectedGraph/). This master-dev lineage carries no Dependencies/
+# (that one belongs to the FIR18 lineage, on branch fir18). DirectedGraph/ is here
+# because tlib itself now depends on it -- header-only, nothing to compile.
 # CONFIGURE_DEPENDS keeps the source list in sync with the directories (the
 # interval standalone project taught us the cost of a stale explicit list).
 file(GLOB SIGNALS_SRC   CONFIGURE_DEPENDS signals/*.cpp)
@@ -42,7 +43,8 @@ target_include_directories(signals PUBLIC
     signals
     interval
     FaustAlgebra
-    tlib)
+    tlib
+    DirectedGraph)
 
 # the test executable
 add_executable(signals-tests tests/tests.cpp)
