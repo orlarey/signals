@@ -222,26 +222,36 @@ class digraph {
     // Methods used to visit the graph
     //--------------------------------------------------------------------------
 
-    // returns the set of nodes of the graph
-    [[nodiscard]] const std::set<N>& nodes() const { return fContent->nodes(); }
+    // These four return a REFERENCE into the graph's content. Calling them on a temporary
+    // would leave that reference dangling as soon as the temporary dies (the content is
+    // shared by reference count, so it survives only if another digraph still holds it --
+    // which cannot be known statically). The deleted rvalue overloads therefore reject
+    // 'f(...).nodes()' at COMPILE TIME : bind the graph to a named variable first.
 
     // returns the set of nodes of the graph
-    [[nodiscard]] const std::map<N, TDestinations>& connections() const
+    [[nodiscard]] const std::set<N>& nodes() const& { return fContent->nodes(); }
+    const std::set<N>&               nodes() const&& = delete;
+
+    // returns the set of nodes of the graph
+    [[nodiscard]] const std::map<N, TDestinations>& connections() const&
     {
         return fContent->connections();
     }
+    const std::map<N, TDestinations>& connections() const&& = delete;
 
     // returns the destinations of node n in the graph
-    [[nodiscard]] const TDestinations& destinations(const N& n) const
+    [[nodiscard]] const TDestinations& destinations(const N& n) const&
     {
         return fContent->destinations(n);
     }
+    const TDestinations& destinations(const N& n) const&& = delete;
 
     // returns the weights of the connections between two nodes
-    [[nodiscard]] const TWeights& weights(const N& n1, const N& n2) const
+    [[nodiscard]] const TWeights& weights(const N& n1, const N& n2) const&
     {
         return fContent->weights(n1, n2);
     }
+    const TWeights& weights(const N& n1, const N& n2) const&& = delete;
 
     //--------------------------------------------------------------------------
     // Methods used to query the graph
