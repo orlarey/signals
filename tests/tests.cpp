@@ -26,7 +26,10 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
+#include "binop.hh"
+#include "sigattributes.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigtype.hh"
@@ -44,6 +47,65 @@ static void check(bool ok, const std::string& what)
         std::cout << "FAIL : " << what << std::endl;
         gFailed++;
     }
+}
+
+static void checkNatureFixpoint()
+{
+    std::cout << "--- nature by fixpoint (shadow of the current type system) ---" << std::endl;
+
+    // (1) straight-line signals : every rule of the dense switch that has no fixpoint
+    Tree i12  = sigAdd(sigInt(1), sigInt(2));                     // kInt
+    Tree mix  = sigMul(sigInput(0), sigReal(0.5));                // kReal
+    Tree cst  = sigIntCast(sigInput(0));                          // kInt despite a kReal child
+    Tree cmp  = sigBinOp(kLT, sigReal(1.0), sigReal(2.0));        // kInt : a comparison is boolean
+    Tree quo  = sigBinOp(kDiv, sigInt(7), sigInt(2));             // kReal : division floats
+    Tree selr = sigSelect2(sigInt(0), sigInt(1), sigReal(2.0));   // kReal
+
+    // The three rules of the form "this argument does not contribute its nature" are only
+    // exercised when that argument's nature DIFFERS from the result's -- hence the kReal
+    // second argument on signals whose result must stay kInt.
+    Tree dly = sigDelay(sigInt(7), sigReal(3.0));                    // kInt : amount excluded
+    Tree sel = sigSelect2(sigReal(0.0), sigInt(1), sigInt(2));       // kInt : selector excluded
+    Tree att = sigAttach(sigInt(1), sigReal(2.0));                   // kInt : effect excluded
+
+    // (2) a self-recursion that stays kInt : x = 1 + x@1.
+    // In symbolic form the rec node and its self-reference are ONE hash-consed node, so
+    // the reference can be built before the body it will close over.
+    Tree idA   = tree(unique("A"));
+    Tree refA  = ref(idA);
+    Tree bodyA = sigAdd(sigInt(1), sigDelay1(sigProj(0, refA)));
+    Tree recA  = sigProj(0, rec(idA, list1(bodyA)));
+
+    // (3) a self-recursion that RISES to kReal : y = 0.5 + y@1 needs a second round,
+    // since the variable starts at the bottom of the lattice (kInt).
+    Tree idB   = tree(unique("B"));
+    Tree refB  = ref(idB);
+    Tree bodyB = sigAdd(sigReal(0.5), sigDelay1(sigProj(0, refB)));
+    Tree recB  = sigProj(0, rec(idB, list1(bodyB)));
+
+    // (4) a two-branch group whose branches settle on DIFFERENT natures : the point of
+    // keeping one V per branch (a Row) instead of a single value per component.
+    Tree idC  = tree(unique("C"));
+    Tree refC = ref(idC);
+    Tree c0   = sigAdd(sigInt(1), sigDelay1(sigProj(0, refC)));  // kInt
+    Tree c1 = sigAdd(sigMul(sigReal(0.5), sigProj(0, refC)),     // kReal
+                     sigDelay1(sigProj(1, refC)));
+    Tree grpC  = rec(idC, list2(c0, c1));
+    Tree recC0 = sigProj(0, grpC);
+    Tree recC1 = sigProj(1, grpC);
+
+    Tree outs = nil();
+    for (Tree s : {i12, mix, cst, dly, cmp, quo, sel, selr, att, recA, recB, recC0, recC1}) {
+        outs = cons(s, outs);
+    }
+
+    typeAnnotation(outs, false);
+
+    // shadowCheckNature recomputes the nature of EVERY annotated subterm reachable from
+    // outs and compares it to the one inferSigType stored. Since nature is exact, the
+    // only acceptable result is zero divergence.
+    check(shadowCheckExactAttributes(outs, true) == 0,
+          "the five exact attributes by fixpoint agree with the type system");
 }
 
 int main()
@@ -88,6 +150,8 @@ int main()
     Tree n = sigAdd(sigInt(1), sigInt(2));
     typeAnnotation(n, false);
     check(getCertifiedSigType(n)->nature() == kInt, "type: 1 + 2 is kInt");
+
+    checkNatureFixpoint();
 
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
     return gFailed ? 1 : 0;
