@@ -20,13 +20,20 @@
 #include <set>
 #include <stack>
 
-//===========================================================
-// digraph : a directed graph, a set of nodes f type N and a
-// set of connections between these nodes. Connections have an
-// associated value, by defaut 0. This value is used in Faust
-// to represent the time dependency between computations.
-//===========================================================
-
+/**
+ * @brief A shared, mutable handle to a directed graph whose nodes have type N.
+ *
+ * Connections carry integer weights, defaulting to 0, which Faust uses to
+ * represent time dependencies between computations.
+ *
+ * Copy construction and copy assignment intentionally share the underlying
+ * graph instead of duplicating it. Mutating any copy therefore changes the
+ * graph observed through every alias, while copying a handle remains cheap.
+ *
+ * Concurrent mutation through aliases requires external synchronization. A
+ * digraph used as a key in an ordered container must not be mutated through
+ * any alias while stored there because its ordering depends on its contents.
+ */
 template <typename N>
 class digraph {
     using TWeights      = std::set<int>;
@@ -162,11 +169,17 @@ class digraph {
         }
     };
 
+    // Shared ownership provides intentional reference semantics: all copied
+    // digraph handles observe and mutate this same internal graph.
     std::shared_ptr<internalgraph> fContent = std::make_shared<internalgraph>();
 
    public:
     //--------------------------------------------------------------------------
-    // Methods used to build the graph
+    // Public API: graph construction and inspection
+    //--------------------------------------------------------------------------
+
+    //--------------------------------------------------------------------------
+    // Mutating operations; their effects are visible through every copied handle
     //--------------------------------------------------------------------------
 
     // Add the node n to the graph
