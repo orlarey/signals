@@ -30,6 +30,7 @@
 
 #include "binop.hh"
 #include "sigattributes.hh"
+#include "sigintervals.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigtype.hh"
@@ -94,8 +95,15 @@ static void checkNatureFixpoint()
     Tree recC0 = sigProj(0, grpC);
     Tree recC1 = sigProj(1, grpC);
 
+    // (5) the canonical probe target: a mod-counter m = (1 + m@1) % 2000. The current
+    // system reports [0, +inf) ; the certified descending probe must give [0, 1999].
+    Tree idM   = tree(unique("M"));
+    Tree refM  = ref(idM);
+    Tree bodyM = sigBinOp(kRem, sigAdd(sigInt(1), sigDelay1(sigProj(0, refM))), sigInt(2000));
+    Tree recM  = sigProj(0, rec(idM, list1(bodyM)));
+
     Tree outs = nil();
-    for (Tree s : {i12, mix, cst, dly, cmp, quo, sel, selr, att, recA, recB, recC0, recC1}) {
+    for (Tree s : {i12, mix, cst, dly, cmp, quo, sel, selr, att, recA, recB, recC0, recC1, recM}) {
         outs = cons(s, outs);
     }
 
@@ -106,6 +114,15 @@ static void checkNatureFixpoint()
     // only acceptable result is zero divergence.
     check(shadowCheckExactAttributes(outs, true) == 0,
           "the five exact attributes by fixpoint agree with the type system");
+
+    // The interval shadow CLASSIFIES rather than equating (no exact oracle). On this
+    // small corpus we still demand: nothing suspicious (no empty against a bounded
+    // reference, no incomparable overlap), and nothing strictly coarser.
+    IntervalShadowStats st = shadowCheckInterval(outs, true);
+    check(st.total() > 0, "interval shadow compared some signals");
+    check(st.toEmpty == 0, "interval: never empty where the type system had bounds");
+    check(st.incomparable == 0, "interval: no incomparable overlap");
+    check(st.wider == 0, "interval: never coarser than the type system");
 }
 
 int main()
