@@ -30,6 +30,7 @@
 
 #include "binop.hh"
 #include "sigattributes.hh"
+#include "sighorizon.hh"
 #include "sigintervals.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
@@ -123,6 +124,15 @@ static void checkNatureFixpoint()
     check(st.toEmpty == 0, "interval: never empty where the type system had bounds");
     check(st.incomparable == 0, "interval: no incomparable overlap");
     check(st.wider == 0, "interval: never coarser than the type system");
+
+    // The horizon analysis must date exactly the three unclamped accumulators of this
+    // corpus -- recA (int counter, wraps at 2^31) and the two int-counter branches --
+    // plus the float accumulator recB, absorbed at ~2^24 samples in single precision.
+    // The certified mod-counter must NOT be dated. T* is recB's absorption.
+    HorizonReport hr = horizonAnalysis(outs, false);
+    check(hr.events.size() == 3, "horizon: three dated accumulators");
+    check(hr.horizonSamples > 1.6e7 && hr.horizonSamples < 1.7e7,
+          "horizon: T* is the float absorption at ~2^24 samples");
 }
 
 int main()
