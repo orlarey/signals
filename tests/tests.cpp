@@ -148,8 +148,8 @@ static void checkNatureFixpoint()
     // which plain widening would only give [0, +inf).
     check(ty(dly)->getInterval().lo() == 0 && ty(dly)->getInterval().hi() == 7,
           "interval: delay output covers its initial zeros and its source");
-    check(ty(recM)->getInterval().lo() == 0 && ty(recM)->getInterval().hi() <= 2000,
-          "interval: the mod-counter is certified bounded (plain widening gives +inf)");
+    check(ty(recM)->getInterval().lo() == 0 && ty(recM)->getInterval().hi() == 1999,
+          "interval: the mod-counter is certified [0, 1999] (integer modulo)");
 
     // The horizon analysis must date exactly the three unclamped accumulators of this
     // corpus -- recA (int counter, wraps at 2^31) and the two int-counter branches --
