@@ -124,20 +124,32 @@ static void checkNatureFixpoint()
 
     typeAnnotation(outs, false);
 
-    // shadowCheckNature recomputes the nature of EVERY annotated subterm reachable from
-    // outs and compares it to the one inferSigType stored. Since nature is exact, the
-    // only acceptable result is zero divergence.
-    check(shadowCheckExactAttributes(outs, true) == 0,
-          "the five exact attributes by fixpoint agree with the type system");
+    // The facade IS the type system: assert its verdicts directly on the designed
+    // corpus (the natures were built pairwise, the mod-counter is probe-certified).
+    auto ty = [](Tree s) { return isSimpleType(getCertifiedSigType(s)); };
+    check(ty(i12)->nature() == kInt, "nature: 1+2 stays int");
+    check(ty(mix)->nature() == kReal, "nature: input*0.5 is real");
+    check(ty(cst)->nature() == kInt, "nature: intCast forces int");
+    check(ty(cmp)->nature() == kInt && ty(cmp)->boolean() == kBool,
+          "nature: a comparison is a boolean int");
+    check(ty(quo)->nature() == kReal, "nature: division floats");
+    check(ty(dly)->nature() == kInt, "nature: the delay amount is excluded");
+    check(ty(sel)->nature() == kInt, "nature: the selector is excluded");
+    check(ty(att)->nature() == kInt, "nature: the attached signal is excluded");
+    check(ty(recA)->nature() == kInt, "nature: x = 1 + x@1 stays int");
+    check(ty(recB)->nature() == kReal, "nature: y = 0.5 + y@1 rises to real");
+    check(ty(recC0)->nature() == kInt && ty(recC1)->nature() == kReal,
+          "nature: the two branches of a group settle independently");
+    check(ty(i12)->variability() == kKonst, "variability: constants are konst");
+    check(ty(mix)->variability() == kSamp, "variability: inputs vary by samples");
+    check(ty(recM)->variability() == kSamp, "variability: recursions vary by samples");
 
-    // The interval shadow CLASSIFIES rather than equating (no exact oracle). On this
-    // small corpus we still demand: nothing suspicious (no empty against a bounded
-    // reference, no incomparable overlap), and nothing strictly coarser.
-    IntervalShadowStats st = shadowCheckInterval(outs, true);
-    check(st.total() > 0, "interval shadow compared some signals");
-    check(st.toEmpty == 0, "interval: never empty where the type system had bounds");
-    check(st.incomparable == 0, "interval: no incomparable overlap");
-    check(st.wider == 0, "interval: never coarser than the type system");
+    // The intervals: straight-line bounds, and the probe-certified mod-counter, for
+    // which plain widening would only give [0, +inf).
+    check(ty(dly)->getInterval().lo() == 0 && ty(dly)->getInterval().hi() == 7,
+          "interval: delay output covers its initial zeros and its source");
+    check(ty(recM)->getInterval().lo() == 0 && ty(recM)->getInterval().hi() <= 2000,
+          "interval: the mod-counter is certified bounded (plain widening gives +inf)");
 
     // The horizon analysis must date exactly the three unclamped accumulators of this
     // corpus -- recA (int counter, wraps at 2^31) and the two int-counter branches --
@@ -152,11 +164,8 @@ static void checkNatureFixpoint()
     check(hr.horizonDefaultSamples > 1.6e7 && hr.horizonDefaultSamples < 1.7e7,
           "horizon: nominal T* stays the unparameterized float accumulator");
 
-    // The facade: SimpleTypes assembled from the fixpoint domains. The five exact
-    // fields must match the current system on every typed signal; recType(X, i) is
-    // type(proj(i, X)); and the boundary is STRICT -- asking the type of structure
-    // (a list, or a bare recursive group) is an error.
-    check(shadowCheckFacade(outs, true) == 0, "facade: exact fields match everywhere");
+    // The facade: recType(X, i) is type(proj(i, X)); and the boundary is STRICT --
+    // asking the type of structure (a list, or a bare recursive group) is an error.
     TypeSolver& solver = getTypeSolver(outs);
     {
         Tree X = nullptr, w, body_;
