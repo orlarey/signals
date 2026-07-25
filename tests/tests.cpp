@@ -32,6 +32,7 @@
 #include "sigattributes.hh"
 #include "sighorizon.hh"
 #include "sigintervals.hh"
+#include "sigtypesolver.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigtype.hh"
@@ -150,6 +151,34 @@ static void checkNatureFixpoint()
           "horizon: worst-case T* is the float absorption at ~2^24 samples");
     check(hr.horizonDefaultSamples > 1.6e7 && hr.horizonDefaultSamples < 1.7e7,
           "horizon: nominal T* stays the unparameterized float accumulator");
+
+    // The facade: SimpleTypes assembled from the fixpoint domains. The five exact
+    // fields must match the current system on every typed signal; recType(X, i) is
+    // type(proj(i, X)); and the boundary is STRICT -- asking the type of structure
+    // (a list, or a bare recursive group) is an error.
+    check(shadowCheckFacade(outs, true) == 0, "facade: exact fields match everywhere");
+    TypeSolver& solver = getTypeSolver(outs);
+    {
+        Tree X = nullptr, w, body_;
+        // retrieve recM's group through its projection
+        int  pi;
+        TLIB_ASSERT(isProj(recM, pi, X));
+        check(solver.recType(X, 0) == solver.type(recM), "facade: recType is type of proj");
+        bool caught = false;
+        try {
+            solver.type(outs);  // the top-level LIST is structure, not a signal
+        } catch (std::exception& e) {
+            caught = true;
+        }
+        check(caught, "facade: typing a list is an error");
+        caught = false;
+        try {
+            solver.type(X);  // a bare recursive group is solved, not typed
+        } catch (std::exception& e) {
+            caught = true;
+        }
+        check(caught, "facade: typing a bare recursive group is an error");
+    }
 }
 
 int main()
