@@ -103,8 +103,21 @@ static void checkNatureFixpoint()
     Tree bodyM = sigBinOp(kRem, sigAdd(sigInt(1), sigDelay1(sigProj(0, refM))), sigInt(2000));
     Tree recM  = sigProj(0, rec(idM, list1(bodyM)));
 
+    // (6) a parameter-driven accumulator: z = z@1 * fb + 1 with fb a slider defaulting
+    // to 0.5 (contraction: certified, undated) but reaching 1.0 (true accumulator: dated
+    // at worst case). Discriminates the nominal reading from the worst-case one.
+    // NB: a slider label is a LIST cons(name, path) -- ppsig's printlabel dereferences
+    // hd(label), so a bare symbol label crashes any printing of the widget.
+    Tree fb = sigVSlider(list1(tree("\"fb\"")), sigReal(0.5), sigReal(0), sigReal(1),
+                         sigReal(0.01));
+    Tree idD   = tree(unique("D"));
+    Tree refD  = ref(idD);
+    Tree bodyD = sigAdd(sigMul(sigDelay1(sigProj(0, refD)), fb), sigInt(1));
+    Tree recD  = sigProj(0, rec(idD, list1(bodyD)));
+
     Tree outs = nil();
-    for (Tree s : {i12, mix, cst, dly, cmp, quo, sel, selr, att, recA, recB, recC0, recC1, recM}) {
+    for (Tree s :
+         {i12, mix, cst, dly, cmp, quo, sel, selr, att, recA, recB, recC0, recC1, recM, recD}) {
         outs = cons(s, outs);
     }
 
@@ -130,9 +143,13 @@ static void checkNatureFixpoint()
     // plus the float accumulator recB, absorbed at ~2^24 samples in single precision.
     // The certified mod-counter must NOT be dated. T* is recB's absorption.
     HorizonReport hr = horizonAnalysis(outs, false);
-    check(hr.events.size() == 3, "horizon: three dated accumulators");
+    check(hr.events.size() == 4, "horizon: four dated accumulators at worst case");
+    check(hr.defaultEventCount == 3,
+          "horizon: the parameter-driven accumulator is undated at default values");
     check(hr.horizonSamples > 1.6e7 && hr.horizonSamples < 1.7e7,
-          "horizon: T* is the float absorption at ~2^24 samples");
+          "horizon: worst-case T* is the float absorption at ~2^24 samples");
+    check(hr.horizonDefaultSamples > 1.6e7 && hr.horizonDefaultSamples < 1.7e7,
+          "horizon: nominal T* stays the unparameterized float accumulator");
 }
 
 int main()
