@@ -37,6 +37,7 @@
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigtype.hh"
+#include "sigpattern.hh"
 #include "sigtyperules.hh"
 #include "signals.hh"
 #include "tlib.hh"
@@ -51,6 +52,66 @@ static void check(bool ok, const std::string& what)
         std::cout << "FAIL : " << what << std::endl;
         gFailed++;
     }
+}
+
+static void checkPatternAlgebra()
+{
+    std::cout << "--- the pattern algebra (free algebra over the extended signature) ---"
+              << std::endl;
+
+    TreeAlgebra A;
+    Tree        in0 = A.Input(tree(0));
+    Tree        n = nullptr, m = nullptr, x = nullptr, y = nullptr;
+
+    // simplify rule n*(m*x) -> (n*m)*x, destructured on 2*(3*in0)
+    Tree t1 = A.Mul(tree(2), A.Mul(tree(3), in0));
+    check(pat::Mul(pat::num(n), pat::Mul(pat::num(m), pat::var(x))).match(t1),
+          "pattern: n*(m*x) matches 2*(3*in0)");
+    check(n == tree(2) && m == tree(3) && x == in0,
+          "pattern: bindings are the matched subtrees");
+    check(!pat::Mul(pat::num(n), pat::Mul(pat::num(m), pat::var(x)))
+               .match(A.Mul(tree(2), A.Mul(in0, tree(3)))),
+          "pattern: a guard out of place fails the whole match");
+
+    // simplify rule -n*(x-y) -> n*(y-x), destructured on -4*(in0-1)
+    Tree t2 = A.Mul(tree(-4), A.Sub(in0, tree(1)));
+    check(pat::Mul(pat::negNum(n), pat::Sub(pat::var(x), pat::var(y))).match(t2) &&
+              n == tree(-4) && x == in0 && y == tree(1),
+          "pattern: -n*(x-y) destructures through two levels");
+
+    // simplify rule select2(c, a, a) -> a: LINEAR pattern, cross-branch equality is
+    // a pointer comparison in the rule body (hash-consing makes it exact)
+    Tree t3 = A.Select2(in0, A.Mul(tree(2), in0), A.Mul(tree(2), in0));
+    Tree c = nullptr, a = nullptr, b = nullptr;
+    check(pat::Select2(pat::var(c), pat::var(a), pat::var(b)).match(t3) && a == b,
+          "pattern: linearity + hash-consing decide the select2(c, a, a) rule");
+
+    // simplify rule (s@d1)@d2 -> s@(d1+d2): nested delays
+    Tree t4 = A.Delay(A.Delay(in0, tree(3)), tree(2));
+    Tree s = nullptr, d1 = nullptr, d2 = nullptr;
+    check(pat::Delay(pat::Delay(pat::var(s), pat::num(d1)), pat::num(d2)).match(t4) &&
+              s == in0 && d1 == tree(3) && d2 == tree(2),
+          "pattern: nested delays destructure");
+
+    // the generators: pinned constant, ordered alternative
+    check(pat::constant(t4).match(t4) && !pat::constant(t4).match(t1),
+          "pattern: constant matches only its own tree");
+    Tree z = nullptr;
+    check((pat::IntCast(pat::var(z)) | pat::FloatCast(pat::var(z))).match(A.FloatCast(in0)) &&
+              z == in0,
+          "pattern: ordered alternative binds through the succeeding branch");
+
+    // extended primitives destructure by name, mirroring TreeAlgebra::xt
+    Tree e = nullptr;
+    check(pat::Pow(pat::var(x), pat::num(e)).match(A.Pow(in0, tree(2))) && e == tree(2),
+          "pattern: xtended primitives destructure by name");
+
+    // the depth-1 fragment is exactly the isSigXXX idiom
+    int  op = -1;
+    Tree u = nullptr, v = nullptr;
+    check(isSigBinOp(t1, &op, u, v) == pat::Mul(pat::var(x), pat::var(y)).match(t1) &&
+              x == u && y == v,
+          "pattern: depth-1 fragment agrees with the isSigXXX destructor");
 }
 
 static void checkNatureFixpoint()
@@ -253,6 +314,7 @@ int main()
     typeAnnotation(n, false);
     check(getCertifiedSigType(n)->nature() == kInt, "type: 1 + 2 is kInt");
 
+    checkPatternAlgebra();
     checkNatureFixpoint();
 
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
