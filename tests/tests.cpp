@@ -32,6 +32,7 @@
 #include "sigattributes.hh"
 #include "sighorizon.hh"
 #include "sigintervals.hh"
+#include "sigtreealgebra.hh"
 #include "sigtypesolver.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
@@ -187,6 +188,25 @@ static void checkNatureFixpoint()
             caught = true;
         }
         check(caught, "facade: typing a bare recursive group is an error");
+    }
+
+    // The INITIAL algebra: rebuilding through TreeAlgebra is the identity up to
+    // alpha-renaming. Rec-free terms come back pointer-EQUAL (hash-consing);
+    // recursive terms come back alpha-equivalent with FRESH variables -- and the
+    // rebuild never redefines a group (immutability-clean, TLIB_REC_STRICT ready).
+    {
+        TreeAlgebra A;
+        const int   redefs = recRedefinitionCount();
+        Tree        outs2  = signalRebuild(outs, A);
+        check(alphaEquiv(outs2, outs), "identity: rebuild is alpha-equivalent");
+        check(areEquiv(outs2, outs) == alphaEquiv(outs2, outs),
+              "identity: direct and de-Bruijn alpha-equivalence agree");
+        check(recRedefinitionCount() == redefs,
+              "identity: the rebuild never redefines a recursive group");
+        check(signalRebuild(mix, A) == mix, "identity: rec-free rebuild is pointer-equal");
+        check(signalRebuild(dly, A) == dly, "identity: delay chain is pointer-equal");
+        check(outs2 != outs,
+              "identity: recursive groups get fresh variables (alpha, not equality)");
     }
 }
 
