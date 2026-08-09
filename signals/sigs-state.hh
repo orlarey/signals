@@ -58,19 +58,20 @@ namespace sigs {
 // constant still yields a sample-rate signal.
 enum : unsigned int { kAudioRate = 1u << 4 };
 
-// Order bits : the 4-level classification of sigorderrules (0 numbers,
-// 1 constants, 2 user interface, 3 audio) encoded as three existential
-// bits -- "a carrier of this level reaches me". The max of the order
-// lattice and the union of the bits coincide because every inferSigOrder
-// rule is either a carrier declaration or a max of the children (checked
-// exhaustively, xtended included). kOrderAudio differs from kAudioRate
-// on ONE symbol : select2, whose order rule is deliberately pessimistic
-// (unconditional 3) while the fine bit stays the union of the branches.
-// Known over-approximations inherited from the union rule : ffun with
-// slow arguments (precedent : FFUN already declares kAudioRate
-// unconditionally) and attach, whose order ignores its second branch.
+// Order bits : the 4-level classification of the historical sigorderrules
+// (0 numbers, 1 constants, 2 user interface, 3 audio) encoded as
+// existential bits -- "a carrier of this level reaches me". The max of
+// the order lattice and the union of the bits coincide because every
+// inference rule is either a carrier declaration or a max of the
+// children (checked exhaustively, xtended included). The audio level
+// reads kAudioRate itself : select2's historical pessimism (order 3
+// unconditionally) was judged and dropped (exp-select2fin-20260809 :
+// control-rate selections hoist, sawtoothLab x1.55), which made the
+// separate order-audio bit the exact duplicate of kAudioRate. Known
+// over-approximations inherited from the union rule : ffun with slow
+// arguments (precedent : FFUN declares kAudioRate unconditionally) and
+// attach, whose historical order ignores its second branch.
 enum : unsigned int {
-    kOrderAudio = 1u << 5,  ///< an order-3 carrier occurs (select2 included)
     kOrderCtrl  = 1u << 6,  ///< an order-2 carrier occurs (UI, fvariable...)
     kOrderConst = 1u << 7,  ///< an order-1 carrier occurs (fconstant...)
 };
@@ -81,12 +82,21 @@ inline bool isAudioRate(Tree t)
     return (t->contains() & kAudioRate) != 0;
 }
 
-///< order 0-3 of a signal (numbers / constants / UI / audio), read from
-///< the kind bits : highest order bit present, O(1), total domain
+///< order 0-4 of a signal (numbers / constants / UI / audio /
+///< audio-recursive), read from the kind bits : highest level present,
+///< O(1), total domain. Level 4 is tlib's own kContainsRec bit : "a
+///< recursive node reaches me" == "I depend on some state" (inside a
+///< definition too : a self-reference is proj(i, SYMREC), the rec node
+///< closes its knot through the RECDEF property, not a branch, so the
+///< bit stays honest). Known pessimisms : SOME state (not necessarily
+///< my own), and table generators whose init-time recursions count.
 inline int sigOrder(Tree t)
 {
     unsigned int k = t->contains();
-    if (k & kOrderAudio) {
+    if (t->containsRec()) {
+        return 4;
+    }
+    if (k & kAudioRate) {
         return 3;
     }
     if (k & kOrderCtrl) {
