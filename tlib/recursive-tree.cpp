@@ -480,10 +480,43 @@ static Tree deBruijn2SymCachedReady(Tree t)
  * naming hash alone broke the idempotence of normalizeRecGroups on
  * transversal merges (the standalone test caught it).
  */
+// Forensic lamp (TLIB_DBJ_POINTER_CENSUS=1) : walk a de Bruijn form about
+// to be NAMED from its canonHash and report every pointer payload with no
+// registered canonical hash -- each one makes the name (hence downstream
+// orders) follow the binary layout. Prints the pointer and the head symbol
+// of its parent, the two facts that identify the creator to register.
+static void dbjPointerCensus(Tree t, Tree parent, std::unordered_set<Tree>& seen)
+{
+    if (!seen.insert(t).second) {
+        return;
+    }
+    const Node& n = t->node();
+    if (n.type() == kPointerNode && !getPointerCanonicalHash(n.getPointer())) {
+        const char* ctx = "?";
+        if (parent != nullptr && parent->node().type() == kSymNode) {
+            ctx = name(parent->node().getSym());
+        }
+        fprintf(stderr, "DBJ-POINTER non-enregistre : %p sous %s\n", n.getPointer(), ctx);
+    }
+    for (int i = 0; i < t->arity(); i++) {
+        dbjPointerCensus(t->branch(i), (t->arity() > 0 && t->node().type() == kSymNode)
+                                            ? t
+                                            : parent,
+                         seen);
+    }
+}
+
 static Tree contentVar(Tree dbj)
 {
+    if (getenv("TLIB_DBJ_POINTER_CENSUS")) {
+        std::unordered_set<Tree> seen;
+        dbjPointerCensus(dbj, nullptr, seen);
+    }
     char buf[24];
     snprintf(buf, sizeof(buf), "D%016zx", static_cast<size_t>(dbj->canonHash()));
+    if (getenv("TLIB_DBJ_NAME_TRACE")) {
+        fprintf(stderr, "DBJ-NAME %s\n", buf);
+    }
     return tree(symbol(buf));
 }
 
