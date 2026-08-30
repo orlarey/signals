@@ -199,15 +199,28 @@ bool isRef(Tree t, int& level)
 //-----------------------------------------------------------------------------------------
 
 // declaration of a recursive tree using a symbolic variable
+// MIGRATION AFFORDANCE (see tlib.hh) : when true, rec() restores the
+// historical overwrite semantics for consumers whose transformation passes
+// still rebuild groups in place. The immutable contract is the destination.
+static bool gMutableRecDefinitions = false;
+
+namespace tlib {
+void setMutableRecDefinitions(bool legacy)
+{
+    gMutableRecDefinitions = legacy;
+}
+}  // namespace tlib
+
 Tree rec(Tree var, Tree body)
 {
     Tree t   = tree(gSymRecSym, var);
     Tree old = t->getProperty(recdefKey());
-    if ((old != nullptr && old != body) || isNil(body)) {
+    if (((old != nullptr && old != body) || isNil(body)) && !gMutableRecDefinitions) {
         // Immutability of recursive definitions (see tree.hh) : a different body is
-        // a redefinition, rec(id, nil) an erasure -- both fatal, no override. The
-        // same body again is an idempotent no-op (falls through, setProperty is a
-        // write of the value already there).
+        // a redefinition, rec(id, nil) an erasure -- both fatal, no override
+        // short of the migration affordance above. The same body again is an
+        // idempotent no-op (falls through, setProperty is a write of the value
+        // already there).
         std::stringstream error;
         error << "ERROR : redefinition of the recursive variable " << *var
               << " (recursive definitions are immutable : use a fresh variable)"

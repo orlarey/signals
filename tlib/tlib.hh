@@ -181,6 +181,16 @@ TLIB_API void cleanup();
 /// A pure performance knob : it never changes the trees created.
 TLIB_API void setHashLoadFactor(double f);
 
+/// MIGRATION AFFORDANCE. Recursive definitions are immutable (see rec() in
+/// recursive-tree.cpp) : redefining a variable with a different body, or
+/// erasing it with rec(id, nil), is fatal. A consumer whose transformation
+/// passes still REBUILD groups in place (define, erase, redefine under the
+/// same variable -- the historical idiom) can restore the old overwrite
+/// semantics with this switch while it migrates. The immutable contract is
+/// the destination : new code must not rely on this, and the switch is
+/// meant to disappear with its last caller.
+TLIB_API void setMutableRecDefinitions(bool legacy);
+
 }  // namespace tlib
 
 #endif
