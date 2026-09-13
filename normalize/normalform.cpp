@@ -1,0 +1,681 @@
+/************************************************************************
+ ************************************************************************
+    FAUST compiler
+    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
+    ---------------------------------------------------------------------
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation; either version 2.1 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ ************************************************************************
+ ************************************************************************/
+
+#include <stdio.h>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <set>
+#include <sstream>
+#include <vector>
+
+#include "sigs-state.hh"
+#include "ppsig.hh"
+#include "sigNewConstantPropagation.hh"
+#include "sigPromotion.hh"
+#include "sigtyperules.hh"
+#include "simplify.hh"
+#include "tree.hh"
+#include "rewrite.hh"
+
+using namespace std;
+
+//----------------------------------------------------------------------------------------
+// Delayed-alias dissolution, caller side (spec GC-MEMBRES par.8).
+//
+// A member r of a recursive group whose definition is a pure literal delay
+// x = y@n (literal n >= 0) stores nothing of its own : every reader can read
+// y n taps deeper. The previous implementation lived INSIDE normalizeRecGroups
+// behind three semantic callbacks (delayedBranch / shiftTerm / reshift) ;
+// this one keeps the signal knowledge where it belongs :
+//
+//   1. detect the alias members, and drop every alias that reaches itself
+//      through MENTION edges (its payload uses an alias whose payload uses...
+//      -- the closure that makes the re-pointing rule terminate by
+//      construction). A cycle keeps all its members : a delay loop needs its
+//      storage, and if nothing external reads it, gcRecGroups collects it
+//      wholesale. Alias-of-alias CHAINS stay lazy : the rule folds them on
+//      demand ;
+//   2. re-point every reference in ONE treeRewritePaired pass -- the rule
+//      matches the ORIGINAL, where the group identity is unambiguous even
+//      with nested groups, and folds the amounts locally (same doctrine as
+//      the old reshift) so no nested delay is ever created ;
+//   3. gcRecGroups : the now-unreferenced members disappear -- and whatever
+//      they alone kept alive with them -- projections renumbered.
+//----------------------------------------------------------------------------------------
+static Tree dissolveDelayedAliases(Tree L)
+{
+    // ---- 1a. collect the raw aliases, keyed by their (hash-consed)
+    // projection node : projNode -> (payload, literal amount)
+    struct Alias {
+        Tree payload;
+        int  amount;
+    };
+    map<Tree, Alias, treeorder> raw;
+    {
+        set<Tree, treeorder>  seen;
+        vector<Tree>          work{L};
+        while (!work.empty()) {
+            Tree n = work.back();
+            work.pop_back();
+            if (!seen.insert(n).second) {
+                continue;
+            }
+            Tree id, body;
+            if (isRec(n, id, body)) {
+                // In a complete signal term these are malformations, not
+                // cases : a SYMREC without its RECDEF is a never-defined
+                // reference (the guide's 'fatal erasure', asserted by
+                // rewrite.hh as well), and every signal-level letrec is a
+                // LIST of definitions accessed through projections.
+                TLIB_ASSERT(body != nullptr);
+                TLIB_ASSERT(isList(body));
+                int i = 0;
+                for (Tree l = body; isList(l); l = tl(l), i++) {
+                    Tree def = hd(l);
+                    Tree y, ny;
+                    int  amt, j;
+                    Tree h;
+                    // The rule is UNIFORM over n >= 0 : for all d,
+                    // x = y@0 implies x@d = y@d -- the zero case is not an
+                    // exception, and keeping an arbitrary n >= 1 boundary
+                    // here would be doctrine debt. The LITERAL restriction,
+                    // however, is semantics, not caution : with a variable
+                    // amount v, (y@v)@d = y@(d + v@d) -- the amount is read
+                    // at the SHIFTED time -- not y@(v+d) ; folding would
+                    // substitute v(t) for v(t-d). Even a slow amount fails
+                    // at parameter changes, and the correct generalized form
+                    // would need v's own history line, killing the storage
+                    // argument. Only a compile-time literal is truly
+                    // time-invariant : isSigInt is the exact guard. At depth 0 the payload is
+                    // restricted to a PROJECTION : only a member COPY
+                    // duplicates storage (x = E just names E's history, the
+                    // line would merely move). Empirically the zero case
+                    // never fires today (corpus byte-identical with and
+                    // without it, 2026-08-15) : the uniformity is kept for
+                    // the semantics, not for the corpus.
+                    if (isSigDelay(def, y, ny) && isSigInt(ny, &amt) && amt >= 1) {
+                        raw[proj(i, n)] = {y, amt};
+                    } else if (isProj(def, j, h) ||
+                               (isSigDelay(def, y, ny) && isSigInt(ny, &amt) && amt == 0 &&
+                                isProj(y, j, h))) {
+                        raw[proj(i, n)] = {isProj(def, j, h) ? def : y, 0};
+                    }
+                    work.push_back(def);
+                }
+                continue;
+            }
+            for (int i = 0; i < n->arity(); i++) {
+                work.push_back(n->branch(i));
+            }
+        }
+    }
+    if (raw.empty()) {
+        return L;
+    }
+
+    // ---- 1b. drop alias CYCLES whole -- the guard that makes the
+    // re-pointing rule below terminate by construction, not by traversal
+    // order. The rule rewrites an alias's payload on demand, and that
+    // payload may use other aliases, whose payloads are rewritten on
+    // demand in turn : the reentrant chain follows the MENTION edges
+    // a -> b, "the payload of a contains a use of alias b", found by
+    // walking the payload through BRANCHES only. (Branches only,
+    // deliberately : a RECDEF body met during the real rewrite is
+    // pre-memoized before its definitions descend, and walking it here
+    // would kill every intra-group alias for nothing.) A mention CYCLE
+    // never completes a memo entry -- the payload of x = (y@1)@9 chains
+    // to y whatever wraps it, a compound payload like (y+1)@4 mentions y
+    // all the same, and a pure delay loop is the projection-only case --
+    // so every alias that reaches itself through mention edges is left
+    // undissolved. Its storage was needed anyway (a delay loop keeps a
+    // line), and if nothing external reads the cycle, gcRecGroups
+    // collects it wholesale : the old ad hoc cycle guard became a
+    // theorem. On the acyclic remainder the reentrant chain descends a
+    // finite DAG : termination is structural. Self-reach is the one-step
+    // case of the closure. Chains stay LAZY : a surviving alias keeps
+    // its collected payload untouched, the rule folds on demand.
+    map<Tree, Alias, treeorder> resolved;
+    {
+        // the mention edges, one branch walk per alias
+        map<Tree, vector<Tree>, treeorder> mentions;
+        for (const auto& [p, a] : raw) {
+            set<Tree, treeorder> seen;
+            vector<Tree>         work{a.payload};
+            while (!work.empty()) {
+                Tree n = work.back();
+                work.pop_back();
+                if (!seen.insert(n).second) {
+                    continue;
+                }
+                if (raw.count(n)) {
+                    mentions[p].push_back(n);
+                }
+                for (int i = 0; i < n->arity(); i++) {
+                    work.push_back(n->branch(i));
+                }
+            }
+        }
+        // transitive self-reach over the mention edges
+        for (const auto& [p, a] : raw) {
+            set<Tree, treeorder> seen;
+            vector<Tree>         work;
+            if (auto it = mentions.find(p); it != mentions.end()) {
+                work = it->second;
+            }
+            bool cyclic = false;
+            while (!work.empty() && !cyclic) {
+                Tree n = work.back();
+                work.pop_back();
+                if (n == p) {
+                    cyclic = true;
+                    break;
+                }
+                if (!seen.insert(n).second) {
+                    continue;
+                }
+                if (auto it = mentions.find(n); it != mentions.end()) {
+                    work.insert(work.end(), it->second.begin(), it->second.end());
+                }
+            }
+            if (!cyclic) {
+                resolved[p] = a;
+            }
+        }
+    }
+    if (resolved.empty()) {
+        return L;
+    }
+
+    // ---- 2. one re-pointing pass. The rule matches ORIGINAL nodes ; the
+    // payload is itself rewritten on demand through the shared memo (it may
+    // read other aliases).
+    unordered_map<Tree, Tree>        memo;
+    function<Tree(Tree, Tree)> rule = [&](Tree orig, Tree rebuilt) -> Tree {
+        int  i;
+        Tree g;
+        Tree op, oy;
+        // a delay over an alias projection folds : (proj@n)@k -> payload@(n+k)
+        if (isSigDelay(orig, op, oy)) {
+            auto a = resolved.find(op);
+            if (a != resolved.end()) {
+                Tree pay = treeRewritePaired(a->second.payload, rule, memo);
+                Tree k   = rebuilt->branch(1);  // the rewritten amount
+                return sigDelay(pay,
+                                simplifyExpression(sigAdd(sigInt(a->second.amount), k)));
+            }
+        }
+        // a bare alias projection reads the payload at the alias depth --
+        // and a zero-depth alias reads it directly, no delay node
+        if (isProj(orig, i, g)) {
+            auto a = resolved.find(orig);
+            if (a != resolved.end()) {
+                Tree pay = treeRewritePaired(a->second.payload, rule, memo);
+                return a->second.amount == 0 ? pay
+                                             : sigDelay(pay, sigInt(a->second.amount));
+            }
+        }
+        return rebuilt;
+    };
+    Tree L2 = treeRewritePaired(L, rule, memo);
+
+    // ---- 3. the dead members -- and their cascades -- disappear
+    return gcRecGroups(L2);
+}
+
+// Implementation
+
+//----------------------------------------------------------------------------------------
+// The normalization fixpoint (-eta / -etai <n>).
+//
+// Interval-driven constant propagation changes the TOPOLOGY of recursions: a
+// projection with a singleton interval becomes a constant, edges of the dependency
+// graph disappear, groups shrink -- and two distinct recursive expressions can become
+// alpha-EQUIVALENT. The symbolic representation cannot fuse them (distinct variables),
+// but in de Bruijn form alpha-equivalence IS syntactic equality, so hash-consing
+// fuses them for free. Fusion in turn makes pointers equal, the canonical maps of the
+// polynomial normal form collect the newly identical terms, intervals tighten, new
+// constants appear... hence the loop, iterated until the de Bruijn form is
+// POINTER-stable. Termination: (distinct recursive groups, non-constant nodes)
+// decreases on every productive iteration.
+//----------------------------------------------------------------------------------------
+
+/**
+ * The AC hash of a (de Bruijn) tree: a memoized structural hash that is INSENSITIVE
+ * to permutations inside commutative operations. At a commutative binop, the whole
+ * same-operator spine is FLATTENED (a normalized sum is a binary comb, so a
+ * permutation also changes the associativity) and the MULTISET of its leaves is
+ * combined orderlessly. Two successive iterations of the normalization loop with
+ * equal AC hashes differ only by alpha-renaming (the de Bruijn form has no names)
+ * and commutative permutations: nothing that counts -- the loop can stop. A 64-bit
+ * collision would stop one iteration early, with a correct (just possibly less
+ * simplified) tree: a benign failure mode.
+ */
+static uint64_t acHash(Tree t, std::map<Tree, uint64_t, treeorder>& memo);
+
+static void acFlatten(Tree t, int op, std::vector<uint64_t>& leaves,
+                      std::map<Tree, uint64_t, treeorder>& memo)
+{
+    int  op2;
+    Tree x, y;
+    if (isSigBinOp(t, &op2, x, y) && op2 == op) {
+        acFlatten(x, op, leaves, memo);
+        acFlatten(y, op, leaves, memo);
+    } else {
+        leaves.push_back(acHash(t, memo));
+    }
+}
+
+static uint64_t acHash(Tree t, std::map<Tree, uint64_t, treeorder>& memo)
+{
+    auto it = memo.find(t);
+    if (it != memo.end()) {
+        return it->second;
+    }
+
+    uint64_t h;
+    int      op;
+    Tree     x, y;
+    if (isSigBinOp(t, &op, x, y) && isCommutativeOpcode(op)) {
+        // orderless combine of the flattened spine's leaves
+        std::vector<uint64_t> leaves;
+        acFlatten(x, op, leaves, memo);
+        acFlatten(y, op, leaves, memo);
+        uint64_t sum = 0;
+        for (uint64_t l : leaves) {
+            // mix each leaf so the sum resists simple collisions
+            l ^= l >> 33;
+            l *= 0xff51afd7ed558ccdULL;
+            l ^= l >> 33;
+            sum += l;
+        }
+        h = 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(op) + 1) ^ sum;
+    } else {
+        h = t->hashkey();
+        for (int i = 0; i < t->arity(); i++) {
+            // hash_combine-style: the addition breaks the XOR-linearity that made
+            // 'h = h*F ^ child' cancel on repeated identical elements (a stereo
+            // program with equal outputs hashed to a CONSTANT, blinding the judge)
+            h ^= acHash(t->branch(i), memo) + 0x9e3779b97f4a7c15ULL + (h << 12) + (h >> 4);
+        }
+    }
+    memo[t] = h;
+    return h;
+}
+
+/// Does t contain the node g? Traverses nested recursive definitions through their
+/// bodies; cycle-safe by coinduction (a cycle not passing through g is g-free).
+static bool containsNode(Tree t, Tree g, std::map<Tree, bool, treeorder>& memo)
+{
+    if (t == g) {
+        return true;
+    }
+    auto it = memo.find(t);
+    if (it != memo.end()) {
+        return it->second;
+    }
+    memo[t] = false;  // coinductive pre-mark: cycles resolve to "no" unless found
+    bool found = false;
+    Tree var, body;
+    if (isRec(t, var, body)) {
+        found = body != nullptr && containsNode(body, g, memo);
+    } else {
+        for (int i = 0; !found && i < t->arity(); i++) {
+            found = containsNode(t->branch(i), g, memo);
+        }
+    }
+    memo[t] = found;
+    return found;
+}
+
+/**
+ * The eta rule of the fixpoint, per definition: a projection of a definition that no
+ * longer references its group (the tree became invariant under recursion) is replaced
+ * by the definition itself -- the recursion, and its generated state, disappear.
+ * Chains harvest themselves across loop iterations: replacing proj_k everywhere
+ * (inside other definitions too) frees their referencers for the next round.
+ */
+static Tree degroupInvariants(Tree L)
+{
+    // one containment memo PER GROUP: a subtree can be g1-free yet contain g2
+    std::map<Tree, std::map<Tree, bool, treeorder>, treeorder> memos;
+    return treeRewrite(L, [&memos](Tree r) -> Tree {
+        int  i;
+        Tree g;
+        if (isProj(r, i, g)) {
+            Tree var, body;
+            if (isRec(g, var, body) && body != nullptr) {
+                Tree def = nth(body, i);
+                if (def != nullptr && !isNil(def) && !containsNode(def, g, memos[g])) {
+                    return def;
+                }
+            }
+        }
+        return r;
+    });
+}
+
+/// Count the distinct recursive groups reachable from t (SYMREC nodes, definitions
+/// traversed through their bodies).
+static int countRecGroups(Tree t)
+{
+    std::set<Tree, treeorder>    seen;
+    std::set<Tree, treeorder>    groups;
+    std::vector<Tree> work{t};
+    while (!work.empty()) {
+        Tree s = work.back();
+        work.pop_back();
+        if (!seen.insert(s).second) {
+            continue;
+        }
+        Tree var, body;
+        if (isRec(s, var, body)) {
+            groups.insert(s);
+            if (body) {
+                work.push_back(body);
+            }
+            continue;
+        }
+        for (int i = 0; i < s->arity(); i++) {
+            work.push_back(s->branch(i));
+        }
+    }
+    return static_cast<int>(groups.size());
+}
+
+static Tree normalizeFixpoint(Tree L)
+{
+    // (-etar : the input arrives already normalized -- the entry pass of
+    // simplifyToNormalFormAux runs at the birth of the symbolic form, which
+    // also protects the sym2deBruijn below from the exponential mutual
+    // inlining of fragmented knots, jprev's old pathology. The in-loop
+    // regroup below remains : each iteration's simplifications may
+    // disentangle groups again.)
+    const int groupsBefore = countRecGroups(L);
+    Tree      prev         = nullptr;
+    int       iter         = 0;
+
+    Tree       prevPrev = nullptr;
+    uint64_t   prevAch  = 0;
+    bool       haveAch  = false;
+    // Iteration budget (-etai, default 1): one pass isolates the eta harvest
+    // (merge + propagation + simplify + eta) from the effects of iterated
+    // re-normalization -- the two measure differently; the AC judge may stop
+    // the loop before the budget is spent.
+    const int maxIter = sigs::g.gEtaIterations;
+    while (iter < maxIter) {
+        Tree d = sym2deBruijn(L);
+        if (d == prev) {
+            break;  // the de Bruijn form is pointer-stable: fixpoint reached
+        }
+        {
+            // the AC judge: stop when the iteration changed nothing that counts
+            // (only alpha-renamings and commutative permutations)
+            std::map<Tree, uint64_t, treeorder> achMemo;
+            uint64_t                 ach = acHash(d, achMemo);
+            if (haveAch && ach == prevAch) {
+                break;
+            }
+            prevAch = ach;
+            haveAch = true;
+        }
+        prevPrev = prev;
+        prev     = d;
+        // the merge: alpha-equivalent groups are now shared, back to symbolic --
+        // with CONTENT-DERIVED variable names (deBruijn2Sym), so every name-derived
+        // order is a pure function of the structure, stable across iterations
+        L = deBruijn2Sym(d);
+        typeAnnotation(L, sigs::g.gLocalCausalityCheck);
+        L = newConstantPropagation(L);
+        L = simplify(L);
+        if (sigs::g.gEtaRegroup) {
+            // -etar : complete the loop's two half-measures -- the merge (this
+            // loop's deBruijn round trip) and the dissolution (the eta harvest
+            // below) -- into the full re-partition of the letrecs along the
+            // projection SCCs. The loop's own round trip canonicalizes at the
+            // next iteration : no final trip here (canonical=false). The
+            // simplifications of THIS iteration may have disentangled groups ;
+            // the regroup of this iteration exposes new simplifications to the
+            // next one -- the AC judge stops at their joint fixpoint.
+            L = normalizeRecGroups(L, false);
+        }
+        // the eta rule: harvest the definitions the simplifications made invariant
+        Tree Lh = degroupInvariants(L);
+        if (Lh != L) {
+            // a harvest substitutes definition trees for projections, creating
+            // compositions (nested delays, foldable constants) the backends must
+            // never see: re-normalize NOW, not at the next iteration -- with -eta
+            // (a single pass) there is no next iteration
+            L = Lh;
+            typeAnnotation(L, sigs::g.gLocalCausalityCheck);
+            L = newConstantPropagation(L);
+            L = simplify(L);
+        }
+        typeAnnotation(L, sigs::g.gLocalCausalityCheck);
+        L = signalPromote(L);
+        iter++;
+    }
+
+    const int groupsAfter = countRecGroups(L);
+    std::cerr << "NORMFIX : " << iter << " iteration(s), " << groupsBefore << " -> "
+              << groupsAfter << " recursive group(s)" << std::endl;
+    return L;
+}
+
+static Tree simplifyToNormalFormAux(Tree LS)
+{
+    // Convert deBruijn recursion into symbolic recursion
+    sigs::startTiming("deBruijn2Sym");
+    Tree L1 = deBruijn2Sym(LS);
+    sigs::endTiming("deBruijn2Sym");
+
+    // Normalize the recursive structure AT THE BIRTH of the symbolic form,
+    // unconditionally : the letrec packaging is a syntactic accident, the
+    // projection SCCs are the real structure, and every downstream stage
+    // (simplifications, typing, sharing, the eta loop, the backends) sees
+    // minimal groups. canonical=true here : we just received content-derived
+    // names and owe the same downstream ; the internal round trip runs on
+    // the flattened structure (positional, cheap). Validated against the
+    // 2026-07-27 reference milestone : impulse responses at rounding level
+    // on the whole corpus, cost within noise.
+    // The classifier tells normalizeRecGroups which branches shift time :
+    // branch 0 of a delay whose amount is a literal >= 1, the delayed branch
+    // of mem and prefix. Every other reference counts as instantaneous, so
+    // the member order of each rebuilt group puts current-tick dependencies
+    // first -- the order the backends that emit definitions in list order
+    // rely on (a member read undelayed one position too early costs exactly
+    // one sample : the freeverb comb regression of 2026-08-11).
+    // The dissolution now precedes the normalization, on the caller's side
+    // (spec GC-MEMBRES par.8) : detection, re-pointing and GC are signal
+    // knowledge and live here ; normalizeRecGroups keeps only the ORDER
+    // classifier below. The old shiftTerm/reshift callbacks are gone.
+    sigs::startTiming("dissolveDelayedAliases");
+    L1 = dissolveDelayedAliases(L1);
+    sigs::endTiming("dissolveDelayedAliases");
+    sigs::startTiming("normalizeRecGroups");
+    L1 = normalizeRecGroups(L1, true, [](Tree t, int k) -> bool {
+        Tree x, y;
+        int  n;
+        if (isSigDelay(t, x, y)) {
+            return k == 0 && isSigInt(y, &n) && n >= 1;
+        }
+        if (isSigDelay1(t, x)) {
+            return k == 0;
+        }
+        if (isSigPrefix(t, x, y)) {
+            return k == 1;
+        }
+        return false;
+    });
+    sigs::endTiming("normalizeRecGroups");
+/*
+    // PROBE: cost of the symbolic -> deBruijn -> symbolic round-trip on the
+    // recursive-group representation (scalarization abandoned: n-ary groups
+    // are the right canonical form for dense mutual recursion, see
+    // SCALARIZE-CARTOGRAPHY.md). The round-trip is the identity on the
+    // already-canonical L0; it measures the benefit of the invariance
+    // predicate on real programs.
+    sigs::startTiming("sharing-roundtrip-1/2 sym2deBruijn");
+    Tree LD = sym2deBruijn(L0);
+    sigs::endTiming("sharing-roundtrip-1/2 sym2deBruijn");
+
+    sigs::startTiming("sharing-roundtrip-2/2 deBruijn2Sym");
+    Tree L1 = deBruijn2Sym(LD);
+    sigs::endTiming("sharing-roundtrip-2/2 deBruijn2Sym");
+*/
+    // Annotate L1 with type information
+    sigs::startTiming("L1 typeAnnotation");
+    typeAnnotation(L1, sigs::g.gLocalCausalityCheck);
+    sigs::endTiming("L1 typeAnnotation");
+
+    if (sigs::g.gRangeUI) {
+        // Generate safe values for range UI items (sliders and nentry)
+        sigs::startTiming("Safe values for range UI items");
+        L1 = signalUIPromote(L1);
+        sigs::endTiming("Safe values for range UI items");
+
+        // Annotate L1 with type information
+        sigs::startTiming("L1 typeAnnotation");
+        typeAnnotation(L1, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L1 typeAnnotation");
+    }
+
+    if (sigs::g.gFreezeUI) {
+        // Freeze range UI items (sliders and nentry) to their init value
+        sigs::startTiming("Freeze values for range UI items");
+        L1 = signalUIFreezePromote(L1);
+        sigs::endTiming("Freeze values for range UI items");
+
+        // Annotate L1 with type information
+        sigs::startTiming("L1 typeAnnotation");
+        typeAnnotation(L1, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L1 typeAnnotation");
+    }
+
+    if (sigs::g.gFTZMode > 0) {
+        // Wrap real signals with FTZ
+        sigs::startTiming("FTZ on recursive signals");
+        L1 = signalFTZPromote(L1);
+        sigs::endTiming("FTZ on recursive signals");
+
+        // Annotate L1 with type information
+        sigs::startTiming("L1 typeAnnotation");
+        typeAnnotation(L1, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L1 typeAnnotation");
+    }
+
+    // Needed before 'simplify' (see sigPromotion.hh)
+    sigs::startTiming("Cast and Promotion");
+    Tree L2 = signalPromote(L1);
+    sigs::endTiming("Cast and Promotion");
+
+    // Simplify by executing every computable operation
+    sigs::startTiming("L2 simplification");
+    Tree L3 = simplify(L2);
+    sigs::endTiming("L2 simplification");
+
+    // Annotate L3 with type information
+    sigs::startTiming("L3 typeAnnotation");
+    typeAnnotation(L3, sigs::g.gLocalCausalityCheck);
+    sigs::endTiming("L3 typeAnnotation");
+
+    sigs::startTiming("Cast and Promotion");
+    Tree L4 = signalPromote(L3);
+    sigs::endTiming("Cast and Promotion");
+
+    sigs::startTiming("L4 typeAnnotation");
+    typeAnnotation(L4, sigs::g.gLocalCausalityCheck);
+    sigs::endTiming("L4 typeAnnotation");
+
+    // Must be done after simplification so that 'size' signal is properly simplified to a constant
+    if (sigs::g.gCheckTable) {
+        // Check and generate safe access to rdtable/rwtable
+        sigs::startTiming("Safe access to rdtable/rwtable");
+        L4 = signalTablePromote(L4);
+        sigs::endTiming("Safe access to rdtable/rwtable");
+
+        // Annotate L4 with type information
+        sigs::startTiming("L4 typeAnnotation");
+        typeAnnotation(L4, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L4 typeAnnotation");
+    }
+
+    if (sigs::g.gCheckIntRange) {
+        // Check and generate safe float to integer range conversion
+        sigs::startTiming("Safe float to integer conversion");
+        L4 = signalIntCastPromote(L4);
+        sigs::endTiming("Safe float to integer conversion");
+
+        // Annotate L4 with type information
+        sigs::startTiming("L4 typeAnnotation");
+        typeAnnotation(L4, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L4 typeAnnotation");
+    }
+
+    if (sigs::g.gEtaHarvest) {
+        sigs::startTiming("normalizeFixpoint");
+        L4 = normalizeFixpoint(L4);
+        sigs::endTiming("normalizeFixpoint");
+    }
+
+    // Whoever rebuilt trees above (the renaming, or the -eta fixpoint) leaves them
+    // without type annotations : re-annotate for the passes that follow. This is
+    // tied to the REBUILDERS, not to -co -- the eta loop under serial order needs
+    // it just as much (first caught by zitaRev -etai 10 : assert sigtyperules:224).
+    if (sigs::g.gEtaHarvest) {
+        sigs::startTiming("L4 typeAnnotation");
+        typeAnnotation(L4, sigs::g.gLocalCausalityCheck);
+        sigs::endTiming("L4 typeAnnotation");
+    }
+
+    // Check signal tree
+    sigs::startTiming("L4 signalChecker");
+    SignalChecker checker(L4);
+    sigs::endTiming("L4 signalChecker");
+    return L4;
+}
+
+// Public API
+SIGS_API Tree simplifyToNormalForm(Tree sig)
+{
+    if (isList(sig)) {
+        sigs::startTiming("simplifyToNormalForm");
+        Tree t2 = sig->getProperty(sigs::g.NORMALFORM);
+        if (!t2) {
+            t2 = simplifyToNormalFormAux(sig);
+            sig->setProperty(sigs::g.NORMALFORM, t2);
+        }
+        sigs::endTiming("simplifyToNormalForm");
+        return t2;
+    } else {
+        return simplifyToNormalForm(cons(sig, nil()));
+    }
+}
+
+SIGS_API tvec simplifyToNormalForm2(tvec siglist)
+{
+    tvec res;
+    for (const auto& it : siglist) {
+        res.push_back(simplifyToNormalForm(it));
+    }
+    return res;
+}
+

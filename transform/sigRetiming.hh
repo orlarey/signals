@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
-    FAUST signal library
-    Copyright (C) 2003-2026 GRAME, Centre National de Creation Musicale
+    FAUST compiler / Retiming transformation
+    Copyright (C) 2024-2024 INRIA
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -19,28 +19,18 @@
  ************************************************************************
  ************************************************************************/
 
-#include <cfloat>
-#include "sigs-state.hh"
+#pragma once
 
-namespace sigs {
+#include <stdlib.h>
+#include <cstdlib>
 
-State g;
+#include "signals.hh"
 
-}  // namespace sigs
-
-// The float ranges per precision (index gFloatSize : 1 float, 2 double, 3 quad, 4 fixed-point).
-// (the same tables floats.cpp sets for every backend ; index gFloatSize :
-// 1 float, 2 double, 3 quad, 4 fixed-point). floatmax holds the IEEE-754
-// exponent masks, despite its name.
-static const double  kFloatMin[] = {0, FLT_MIN, DBL_MIN, LDBL_MIN, FLT_MIN};
-static const int64_t kFloatMax[] = {0, 0x7F800000, 0x7FF0000000000000, 0x7FF0000000000000, 0x7F800000};
-
-double sigs::inummin()
-{
-    return kFloatMin[g.gFloatSize];
-}
-
-int64_t sigs::inummax()
-{
-    return kFloatMax[g.gFloatSize];
-}
+/**
+ * @brief add registers to a list of signal to balance timing
+ *
+ * @param lsig a list of signals without registers
+ * @param trace optional trace flag
+ * @return Tree a list of signals with registers
+ */
+Tree sigRetiming(Tree lsig, bool trace = false);

@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
-    FAUST signal library
-    Copyright (C) 2003-2026 GRAME, Centre National de Creation Musicale
+    FAUST compiler
+    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -19,28 +19,28 @@
  ************************************************************************
  ************************************************************************/
 
-#include <cfloat>
-#include "sigs-state.hh"
+#ifndef __SIGIDENTITY__
+#define __SIGIDENTITY__
 
-namespace sigs {
+#include <stdlib.h>
+#include <cstdlib>
 
-State g;
+#include "treeTransform.hh"
 
-}  // namespace sigs
+//-------------------------SignalIdentity-------------------------------
+// An identity transformation on signals. Can be used to test
+// that everything works, and as a pattern for real transformations.
+//----------------------------------------------------------------------
 
-// The float ranges per precision (index gFloatSize : 1 float, 2 double, 3 quad, 4 fixed-point).
-// (the same tables floats.cpp sets for every backend ; index gFloatSize :
-// 1 float, 2 double, 3 quad, 4 fixed-point). floatmax holds the IEEE-754
-// exponent masks, despite its name.
-static const double  kFloatMin[] = {0, FLT_MIN, DBL_MIN, LDBL_MIN, FLT_MIN};
-static const int64_t kFloatMax[] = {0, 0x7F800000, 0x7FF0000000000000, 0x7FF0000000000000, 0x7F800000};
+class SignalIdentity : public TreeTransform {
+   public:
+    SignalIdentity() : fVisitGen(false) {}
 
-double sigs::inummin()
-{
-    return kFloatMin[g.gFloatSize];
-}
+   protected:
+    bool         fVisitGen;
+    virtual Tree transformation(Tree t);
+    virtual void traceEnter(Tree t);
+    virtual void traceExit(Tree t, Tree r);
+};
 
-int64_t sigs::inummax()
-{
-    return kFloatMax[g.gFloatSize];
-}
+#endif

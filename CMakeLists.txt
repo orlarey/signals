@@ -29,18 +29,24 @@ endif()
 file(GLOB SIGNALS_SRC   CONFIGURE_DEPENDS signals/*.cpp)
 file(GLOB TLIB_SRC      CONFIGURE_DEPENDS tlib/*.cpp)
 file(GLOB INTERVAL_SRC  CONFIGURE_DEPENDS interval/*.cpp)
+file(GLOB NORMALIZE_SRC CONFIGURE_DEPENDS normalize/*.cpp)
+file(GLOB TRANSFORM_SRC CONFIGURE_DEPENDS transform/*.cpp)
 
 # the library
 add_library(signals STATIC
     ${SIGNALS_SRC}
     ${TLIB_SRC}
-    ${INTERVAL_SRC})
+    ${INTERVAL_SRC}
+    ${NORMALIZE_SRC}
+    ${TRANSFORM_SRC})
 
 # "." first so that "interval/interval_def.hh"-style prefixed includes
 # resolve; the rest is the flat include model shared with the Faust compiler.
 target_include_directories(signals PUBLIC
     .
     signals
+    normalize
+    transform
     interval
     FaustAlgebra
     tlib

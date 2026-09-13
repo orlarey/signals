@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
-    FAUST signal library
-    Copyright (C) 2003-2026 GRAME, Centre National de Creation Musicale
+    FAUST compiler
+    Copyright (C) 22021 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -19,28 +19,27 @@
  ************************************************************************
  ************************************************************************/
 
-#include <cfloat>
-#include "sigs-state.hh"
+#ifndef __SIG2ELEMENTARY__
+#define __SIG2ELEMENTARY__
 
-namespace sigs {
+#include <stdlib.h>
+#include <cstdlib>
+#include <sstream>
+#include "signalVisitor.hh"
 
-State g;
+//-------------------------Signal2Elementary-------------------------------
+// Transforms signals to Elementary code (see: https://www.elementary.audio)
+//----------------------------------------------------------------------
 
-}  // namespace sigs
+class Signal2Elementary : public SignalVisitor {
+   public:
+    Signal2Elementary() {}
 
-// The float ranges per precision (index gFloatSize : 1 float, 2 double, 3 quad, 4 fixed-point).
-// (the same tables floats.cpp sets for every backend ; index gFloatSize :
-// 1 float, 2 double, 3 quad, 4 fixed-point). floatmax holds the IEEE-754
-// exponent masks, despite its name.
-static const double  kFloatMin[] = {0, FLT_MIN, DBL_MIN, LDBL_MIN, FLT_MIN};
-static const int64_t kFloatMax[] = {0, 0x7F800000, 0x7FF0000000000000, 0x7FF0000000000000, 0x7F800000};
+    void sig2Elementary(Tree L, std::ofstream& fout);
 
-double sigs::inummin()
-{
-    return kFloatMin[g.gFloatSize];
-}
+   protected:
+    void              visit(Tree);
+    std::stringstream fOut;
+};
 
-int64_t sigs::inummax()
-{
-    return kFloatMax[g.gFloatSize];
-}
+#endif

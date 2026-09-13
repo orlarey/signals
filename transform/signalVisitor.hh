@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
-    FAUST signal library
-    Copyright (C) 2003-2026 GRAME, Centre National de Creation Musicale
+    FAUST compiler
+    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -19,28 +19,33 @@
  ************************************************************************
  ************************************************************************/
 
-#include <cfloat>
-#include "sigs-state.hh"
+#pragma once
 
-namespace sigs {
+#include <cstdlib>
+#include "signals.hh"
+#include "treeTraversal.hh"
 
-State g;
+//-------------------------SignalVisitor-------------------------------
+// An identity transformation on signals. Can be used to test
+// that everything works, and as a pattern for real transformations.
+// Here signals are using the symbolic representation for recursive trees,
+// so have to be converted using deBruijn2Sym before.
+//----------------------------------------------------------------------
 
-}  // namespace sigs
+class SignalVisitor : public TreeTraversal {
+   public:
+    SignalVisitor() = default;
+    SignalVisitor(Tree L) { visitRoot(L); }
 
-// The float ranges per precision (index gFloatSize : 1 float, 2 double, 3 quad, 4 fixed-point).
-// (the same tables floats.cpp sets for every backend ; index gFloatSize :
-// 1 float, 2 double, 3 quad, 4 fixed-point). floatmax holds the IEEE-754
-// exponent masks, despite its name.
-static const double  kFloatMin[] = {0, FLT_MIN, DBL_MIN, LDBL_MIN, FLT_MIN};
-static const int64_t kFloatMax[] = {0, 0x7F800000, 0x7FF0000000000000, 0x7FF0000000000000, 0x7F800000};
+    void visitRoot(Tree L)
+    {
+        while (!isNil(L)) {
+            self(hd(L));
+            L = tl(L);
+        }
+    }
 
-double sigs::inummin()
-{
-    return kFloatMin[g.gFloatSize];
-}
-
-int64_t sigs::inummax()
-{
-    return kFloatMax[g.gFloatSize];
-}
+   protected:
+    bool         fVisitGen{false};  // wether to visit gen signal for tables
+    virtual void visit(Tree t) override;
+};

@@ -39,6 +39,7 @@
 #include "sigtype.hh"
 #include "sigpattern.hh"
 #include "sigtyperules.hh"
+#include "normalform.hh"
 #include "signals.hh"
 #include "tlib.hh"
 
@@ -269,6 +270,58 @@ static void checkNatureFixpoint()
     }
 }
 
+
+// The normal form, from the library alone : the same pipeline the compiler
+// runs (promotion, simplification, the additive and multiplicative normal
+// forms, the recursive groups) on signals built here.
+static void checkTree(Tree got, Tree expected, const std::string& what)
+{
+    check(got == expected, what);
+    if (got != expected) {
+        std::cout << "       got      : " << ppsig(got) << (isList(got) ? "  (a list ; head : " : "") ;
+        if (isList(got)) std::cout << ppsig(hd(got)) << ")";
+        std::cout << std::endl;
+        std::cout << "       expected : " << ppsig(expected) << std::endl;
+    }
+}
+
+// simplifyToNormalForm takes one signal and returns the list holding its normal form
+static Tree nf(Tree sig)
+{
+    return hd(simplifyToNormalForm(sig));
+}
+
+static void checkNormalForm()
+{
+    std::cout << "--- the normal form, from the library alone ---" << std::endl;
+    Tree in0 = sigInput(0);
+    Tree in1 = sigInput(1);
+
+    // constants fold
+    checkTree(nf(sigAdd(sigInt(2), sigInt(3))), sigInt(5), "normal form: 2+3 folds to 5");
+    // neutral elements vanish
+    checkTree(nf(sigMul(in0, sigInt(1))), in0, "normal form: x*1 is x");
+    checkTree(nf(sigAdd(in0, sigInt(0))), in0, "normal form: x+0 is x");
+    // the coefficients of nested products merge : 2*(3*x) and 6*x are one tree
+    check(nf(sigMul(sigInt(2), sigMul(sigInt(3), in0))) ==
+              nf(sigMul(sigInt(6), in0)),
+          "normal form: 2*(3*x) and 6*x normalize to the same tree");
+    // commutativity : x*y + y*x and 2*(x*y) are one tree
+    check(nf(sigAdd(sigMul(in0, in1), sigMul(in1, in0))) ==
+              nf(sigMul(sigInt(2), sigMul(in0, in1))),
+          "normal form: x*y + y*x and 2*(x*y) normalize to the same tree");
+    // One pass is not a fixed point : the factorization in0*(in1+1) + in0*in1 ->
+    // in0*(in1+1+in1) leaves an inner sum that only the next pass collects
+    // (2*in1+1). The eta loop (-eta, budget -etai) iterates to the fixed point.
+    Tree one = nf(sigAdd(sigMul(in0, sigAdd(in1, sigInt(1))), sigMul(in0, in1)));
+    Tree two = nf(one);
+    std::cout << "note : one pass gives " << ppsig(one) << ", a second " << ppsig(two)
+              << (one == two ? " (already a fixed point)" : " (not a fixed point in one pass)") << std::endl;
+    // (the eta loop does not iterate on a recursion-free expression either : it
+    // works the letrec groups). The second pass, however, is a fixed point.
+    checkTree(nf(two), two, "normal form: the second pass is a fixed point on this input");
+}
+
 int main()
 {
     tlib::init();
@@ -314,6 +367,7 @@ int main()
 
     checkPatternAlgebra();
     checkNatureFixpoint();
+    checkNormalForm();
 
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
     return gFailed ? 1 : 0;

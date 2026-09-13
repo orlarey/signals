@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
-    FAUST signal library
-    Copyright (C) 2003-2026 GRAME, Centre National de Creation Musicale
+    FAUST compiler
+    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
@@ -19,28 +19,29 @@
  ************************************************************************
  ************************************************************************/
 
-#include <cfloat>
-#include "sigs-state.hh"
+#ifndef _SIMPLIFY_
+#define _SIMPLIFY_
 
-namespace sigs {
+/*
+ * Simplify a signal.
+ *
+ * Note that the resulting tree will possibly contain incorrectly
+ * promoted subtrees that have to be processed using castPromote.
+ */
+Tree simplify(Tree sig);
 
-State g;
+/// Local, driverless simplification of ONE freshly built node whose subtrees are
+/// already simplified : applies the rewrite rules (and the polynomial normal form
+/// they invoke) to that node only. This is what a transformation RULE may call on
+/// an expression it just built -- never simplify(), whose full traversal would be
+/// a transformation inside a transformation (see the doctrine note in
+/// normalize.cpp, normalizeDelayTerm).
+Tree simplifyExpression(Tree sig);
 
-}  // namespace sigs
+/**
+ * Converts regular tables into doc tables in order to
+ * facilitate the mathematical documentation generation
+ */
+Tree docTableConvertion(Tree sig);
 
-// The float ranges per precision (index gFloatSize : 1 float, 2 double, 3 quad, 4 fixed-point).
-// (the same tables floats.cpp sets for every backend ; index gFloatSize :
-// 1 float, 2 double, 3 quad, 4 fixed-point). floatmax holds the IEEE-754
-// exponent masks, despite its name.
-static const double  kFloatMin[] = {0, FLT_MIN, DBL_MIN, LDBL_MIN, FLT_MIN};
-static const int64_t kFloatMax[] = {0, 0x7F800000, 0x7FF0000000000000, 0x7FF0000000000000, 0x7F800000};
-
-double sigs::inummin()
-{
-    return kFloatMin[g.gFloatSize];
-}
-
-int64_t sigs::inummax()
-{
-    return kFloatMax[g.gFloatSize];
-}
+#endif
