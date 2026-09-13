@@ -36,6 +36,7 @@
 #include "sigtypesolver.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
+#include "sigs-session.hh"
 #include "sigtype.hh"
 #include "sigpattern.hh"
 #include "sigtyperules.hh"

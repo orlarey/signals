@@ -1,0 +1,38 @@
+[0/2] Re-checking globbed directories...
+[1/19] Building CXX object CMakeFiles/signals.dir/transform/sigIdentity.cpp.o
+[2/19] Building CXX object CMakeFiles/signals.dir/transform/revealSum.cpp.o
+[3/19] Building CXX object CMakeFiles/signals.dir/transform/revealFIR.cpp.o
+/Users/yannorlarey/Documents/Install/signals/transform/revealFIR.cpp:22:20: warning: unused function 'sigClocked' [-Wunused-function]
+   22 | static inline Tree sigClocked(Tree, Tree s)
+      |                    ^~~~~~~~~~
+/Users/yannorlarey/Documents/Install/signals/transform/revealFIR.cpp:26:20: warning: unused function 'hasClock' [-Wunused-function]
+   26 | static inline bool hasClock(Tree, Tree&)
+      |                    ^~~~~~~~
+2 warnings generated.
+[4/19] Building CXX object CMakeFiles/signals.dir/normalize/normalform.cpp.o
+/Users/yannorlarey/Documents/Install/signals/normalize/normalform.cpp:416:16: warning: variable 'prevPrev' set but not used [-Wunused-but-set-variable]
+  416 |     Tree       prevPrev = nullptr;
+      |                ^
+1 warning generated.
+[5/19] Building CXX object CMakeFiles/signals.dir/transform/revealMatrix.cpp.o
+[6/19] Building CXX object CMakeFiles/signals.dir/transform/sigDependenciesGraph.cpp.o
+[7/19] Building CXX object CMakeFiles/signals.dir/transform/sigNewConstantPropagation.cpp.o
+[8/19] Building CXX object CMakeFiles/signals.dir/transform/revealIIR.cpp.o
+[9/19] Building CXX object CMakeFiles/signals.dir/transform/sigRecursiveDependencies.cpp.o
+[10/19] Building CXX object CMakeFiles/signals.dir/transform/treeTransform.cpp.o
+[11/19] Building CXX object CMakeFiles/signals.dir/transform/treeTraversal.cpp.o
+[12/19] Building CXX object CMakeFiles/signals.dir/transform/sigRetiming.cpp.o
+[13/19] Building CXX object CMakeFiles/signals.dir/transform/signalVisitor.cpp.o
+[14/19] Building CXX object CMakeFiles/signals.dir/transform/signal2Elementary.cpp.o
+[15/19] Building CXX object CMakeFiles/signals.dir/transform/sigPromotion.cpp.o
+[16/19] Building CXX object CMakeFiles/signals-tests.dir/tests/tests.cpp.o
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:233:27: warning: unused variable 'w' [-Wunused-variable]
+  233 |         Tree X = nullptr, w, body_;
+      |                           ^
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:233:30: warning: unused variable 'body_' [-Wunused-variable]
+  233 |         Tree X = nullptr, w, body_;
+      |                              ^~~~~
+2 warnings generated.
+[17/19] Linking CXX static library libsignals.a
+[18/19] Linking CXX executable signals-tests
+build a rendu 0

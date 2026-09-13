@@ -1,0 +1,10 @@
+[0/2] Re-checking globbed directories...
+[1/3] Building CXX object CMakeFiles/signals-tests.dir/tests/tests.cpp.o
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:234:27: warning: unused variable 'w' [-Wunused-variable]
+  234 |         Tree X = nullptr, w, body_;
+      |                           ^
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:234:30: warning: unused variable 'body_' [-Wunused-variable]
+  234 |         Tree X = nullptr, w, body_;
+      |                              ^~~~~
+2 warnings generated.
+[2/3] Linking CXX executable signals-tests

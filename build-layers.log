@@ -1,0 +1,184 @@
+[0/2] Re-checking globbed directories...
+[1/124] Building CXX object CMakeFiles/signals.dir/signals/analysis/shlysis.cpp.o
+[2/124] Building CXX object CMakeFiles/signals.dir/signals/analysis/sharing.cpp.o
+[3/124] Building CXX object CMakeFiles/signals.dir/signals/analysis/sigRecursiveDependencies.cpp.o
+[4/124] Building CXX object CMakeFiles/signals.dir/signals/forms/kernelCandidacy.cpp.o
+[5/124] Building CXX object CMakeFiles/signals.dir/signals/forms/factorizeFIRs.cpp.o
+[6/124] Building CXX object CMakeFiles/signals.dir/signals/forms/revealFIR.cpp.o
+/Users/yannorlarey/Documents/Install/signals/signals/forms/revealFIR.cpp:22:20: warning: unused function 'sigClocked' [-Wunused-function]
+   22 | static inline Tree sigClocked(Tree, Tree s)
+      |                    ^~~~~~~~~~
+/Users/yannorlarey/Documents/Install/signals/signals/forms/revealFIR.cpp:26:20: warning: unused function 'hasClock' [-Wunused-function]
+   26 | static inline bool hasClock(Tree, Tree&)
+      |                    ^~~~~~~~
+2 warnings generated.
+[7/124] Building CXX object CMakeFiles/signals.dir/signals/forms/revealIIR.cpp.o
+[8/124] Building CXX object CMakeFiles/signals.dir/signals/forms/revealMatrix.cpp.o
+[9/124] Building CXX object CMakeFiles/signals.dir/signals/forms/revealSum.cpp.o
+[10/124] Building CXX object CMakeFiles/signals.dir/signals/forms/sigIIR.cpp.o
+/Users/yannorlarey/Documents/Install/signals/signals/forms/sigIIR.cpp:128:12: warning: unused function 'compareRecProj' [-Wunused-function]
+  128 | static int compareRecProj(Tree x, Tree y)
+      |            ^~~~~~~~~~~~~~
+1 warning generated.
+[11/124] Building CXX object CMakeFiles/signals.dir/signals/forms/sigFIR.cpp.o
+[12/124] Building CXX object CMakeFiles/signals.dir/signals/forms/sigScalarize.cpp.o
+[13/124] Building CXX object CMakeFiles/signals.dir/signals/forms/sigDependenciesGraph.cpp.o
+[14/124] Building CXX object CMakeFiles/signals.dir/signals/normalize/aterm.cpp.o
+[15/124] Building CXX object CMakeFiles/signals.dir/signals/normalize/normalize.cpp.o
+[16/124] Building CXX object CMakeFiles/signals.dir/signals/normalize/mterm.cpp.o
+[17/124] Building CXX object CMakeFiles/signals.dir/signals/passes/nestSums.cpp.o
+[18/124] Building CXX object CMakeFiles/signals.dir/signals/passes/placeTemps.cpp.o
+/Users/yannorlarey/Documents/Install/signals/signals/passes/placeTemps.cpp:80:16: warning: unused variable 'y' [-Wunused-variable]
+   80 |     Tree    x, y, var, body;
+      |                ^
+/Users/yannorlarey/Documents/Install/signals/signals/passes/placeTemps.cpp:156:18: warning: unused variable 'var' [-Wunused-variable]
+  156 |             Tree var, body;
+      |                  ^~~
+/Users/yannorlarey/Documents/Install/signals/signals/passes/placeTemps.cpp:156:23: warning: unused variable 'body' [-Wunused-variable]
+  156 |             Tree var, body;
+      |                       ^~~~
+3 warnings generated.
+[19/124] Building CXX object CMakeFiles/signals.dir/signals/passes/reassociate.cpp.o
+[20/124] Building CXX object CMakeFiles/signals.dir/signals/normalize/simplify.cpp.o
+[21/124] Building CXX object CMakeFiles/signals.dir/signals/passes/sigRetiming.cpp.o
+[22/124] Building CXX object CMakeFiles/signals.dir/signals/passes/lowerSums.cpp.o
+[23/124] Building CXX object CMakeFiles/signals.dir/signals/passes/sigNewConstantPropagation.cpp.o
+[24/124] Building CXX object CMakeFiles/signals.dir/signals/passes/sigPromotion.cpp.o
+[25/124] Building CXX object CMakeFiles/signals.dir/signals/session/sigs-session.cpp.o
+[26/124] Building CXX object CMakeFiles/signals.dir/signals/terms/binop.cpp.o
+[27/124] Building CXX object CMakeFiles/signals.dir/signals/terms/sigOpcode.cpp.o
+[28/124] Building CXX object CMakeFiles/signals.dir/signals/terms/prim2.cpp.o
+[29/124] Building CXX object CMakeFiles/signals.dir/signals/terms/ppsig.cpp.o
+[30/124] Building CXX object CMakeFiles/signals.dir/signals/session/normalform.cpp.o
+/Users/yannorlarey/Documents/Install/signals/signals/session/normalform.cpp:416:16: warning: variable 'prevPrev' set but not used [-Wunused-but-set-variable]
+  416 |     Tree       prevPrev = nullptr;
+      |                ^
+1 warning generated.
+[31/124] Building CXX object CMakeFiles/signals.dir/signals/terms/sigs-config.cpp.o
+[32/124] Building CXX object CMakeFiles/signals.dir/signals/terms/signals.cpp.o
+[33/124] Building CXX object CMakeFiles/signals.dir/signals/terms/sigs-state.cpp.o
+[34/124] Building CXX object CMakeFiles/signals.dir/signals/terms/sigtreealgebra.cpp.o
+[35/124] Building CXX object CMakeFiles/signals.dir/signals/terms/subsignals.cpp.o
+[36/124] Building CXX object CMakeFiles/signals.dir/signals/terms/sigtype.cpp.o
+[37/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/sigIdentity.cpp.o
+[38/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/signalVisitor.cpp.o
+[39/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/sigvisitor.cpp.o
+In file included from /Users/yannorlarey/Documents/Install/signals/signals/traverse/sigvisitor.cpp:25:
+/Users/yannorlarey/Documents/Install/signals/signals/traverse/sigvisitor.hh:159:18: warning: 'fullvisitor::visitWRTbl' hides overloaded virtual function [-Woverloaded-virtual]
+  159 |     virtual void visitWRTbl(Tree sig, Tree id, Tree s1, Tree s2, Tree s3, Tree s4)
+      |                  ^
+/Users/yannorlarey/Documents/Install/signals/signals/traverse/sigvisitor.hh:80:18: note: hidden overloaded virtual function 'sigvisitor::visitWRTbl' declared here: different number of parameters (5 vs 6)
+   80 |     virtual void visitWRTbl(Tree sig, Tree id, Tree s1, Tree s2, Tree s3) = 0;
+      |                  ^
+1 warning generated.
+[40/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/treeTransform.cpp.o
+[41/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/sigtransform.cpp.o
+[42/124] Building CXX object CMakeFiles/signals.dir/signals/traverse/treeTraversal.cpp.o
+[43/124] Building CXX object CMakeFiles/signals.dir/signals/types/recursivness.cpp.o
+[44/124] Building CXX object CMakeFiles/signals.dir/signals/types/sigprint.cpp.o
+[45/124] Building CXX object CMakeFiles/signals.dir/signals/types/sigintervals.cpp.o
+[46/124] Building CXX object CMakeFiles/signals.dir/signals/types/sigattributes.cpp.o
+[47/124] Building CXX object CMakeFiles/signals.dir/tlib/dcond.cpp.o
+[48/124] Building CXX object CMakeFiles/signals.dir/tlib/garbageable.cpp.o
+[49/124] Building CXX object CMakeFiles/signals.dir/signals/types/sigtypesolver.cpp.o
+[50/124] Building CXX object CMakeFiles/signals.dir/signals/types/sigtyperules.cpp.o
+[51/124] Building CXX object CMakeFiles/signals.dir/signals/types/sighorizon.cpp.o
+[52/124] Building CXX object CMakeFiles/signals.dir/tlib/node.cpp.o
+[53/124] Building CXX object CMakeFiles/signals.dir/tlib/list.cpp.o
+[54/124] Building CXX object CMakeFiles/signals.dir/tlib/recursive-print.cpp.o
+[55/124] Building CXX object CMakeFiles/signals.dir/tlib/tlib-error.cpp.o
+[56/124] Building CXX object CMakeFiles/signals.dir/tlib/symbol.cpp.o
+[57/124] Building CXX object CMakeFiles/signals.dir/tlib/tlib.cpp.o
+[58/124] Building CXX object CMakeFiles/signals.dir/interval/bitwiseOperations.cpp.o
+[59/124] Building CXX object CMakeFiles/signals.dir/tlib/tree.cpp.o
+[60/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAbs.cpp.o
+[61/124] Building CXX object CMakeFiles/signals.dir/interval/check.cpp.o
+[62/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAcos.cpp.o
+[63/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAcosh.cpp.o
+[64/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAnd.cpp.o
+[65/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAdd.cpp.o
+[66/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAsin.cpp.o
+[67/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAsinh.cpp.o
+[68/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAtan2.cpp.o
+[69/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAtan.cpp.o
+[70/124] Building CXX object CMakeFiles/signals.dir/interval/intervalAtanh.cpp.o
+[71/124] Building CXX object CMakeFiles/signals.dir/interval/intervalButton.cpp.o
+[72/124] Building CXX object CMakeFiles/signals.dir/interval/intervalCheckbox.cpp.o
+[73/124] Building CXX object CMakeFiles/signals.dir/interval/intervalCeil.cpp.o
+[74/124] Building CXX object CMakeFiles/signals.dir/interval/intervalCos.cpp.o
+/Users/yannorlarey/Documents/Install/signals/interval/intervalCos.cpp:30:15: warning: unused function 'cosPi' [-Wunused-function]
+   30 | static double cosPi(double x)
+      |               ^~~~~
+1 warning generated.
+[75/124] Building CXX object CMakeFiles/signals.dir/interval/intervalCosh.cpp.o
+[76/124] Building CXX object CMakeFiles/signals.dir/interval/intervalDelay.cpp.o
+[77/124] Building CXX object CMakeFiles/signals.dir/tlib/recursive-tree.cpp.o
+[78/124] Building CXX object CMakeFiles/signals.dir/interval/intervalDiv.cpp.o
+[79/124] Building CXX object CMakeFiles/signals.dir/interval/intervalEq.cpp.o
+[80/124] Building CXX object CMakeFiles/signals.dir/interval/intervalFloatCast.cpp.o
+[81/124] Building CXX object CMakeFiles/signals.dir/interval/intervalExp.cpp.o
+[82/124] Building CXX object CMakeFiles/signals.dir/interval/intervalFloatNum.cpp.o
+[83/124] Building CXX object CMakeFiles/signals.dir/interval/intervalGe.cpp.o
+[84/124] Building CXX object CMakeFiles/signals.dir/interval/intervalFloor.cpp.o
+[85/124] Building CXX object CMakeFiles/signals.dir/interval/intervalGt.cpp.o
+[86/124] Building CXX object CMakeFiles/signals.dir/interval/intervalHSlider.cpp.o
+[87/124] Building CXX object CMakeFiles/signals.dir/interval/intervalIntNum.cpp.o
+[88/124] Building CXX object CMakeFiles/signals.dir/interval/intervalIntCast.cpp.o
+[89/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLabel.cpp.o
+[90/124] Building CXX object CMakeFiles/signals.dir/interval/intervalInv.cpp.o
+[91/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLsh.cpp.o
+[92/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLog10.cpp.o
+[93/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLe.cpp.o
+[94/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLog.cpp.o
+[95/124] Building CXX object CMakeFiles/signals.dir/interval/intervalLt.cpp.o
+[96/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMax.cpp.o
+[97/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMem.cpp.o
+[98/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMin.cpp.o
+[99/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMissing.cpp.o
+[100/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMod.cpp.o
+[101/124] Building CXX object CMakeFiles/signals.dir/interval/intervalMul.cpp.o
+/Users/yannorlarey/Documents/Install/signals/interval/intervalMul.cpp:37:15: warning: unused function 'specialmultint' [-Wunused-function]
+   37 | static double specialmultint(double a, double b)
+      |               ^~~~~~~~~~~~~~
+1 warning generated.
+[102/124] Building CXX object CMakeFiles/signals.dir/interval/intervalNe.cpp.o
+[103/124] Building CXX object CMakeFiles/signals.dir/interval/intervalNeg.cpp.o
+[104/124] Building CXX object CMakeFiles/signals.dir/interval/intervalNumEntry.cpp.o
+[105/124] Building CXX object CMakeFiles/signals.dir/interval/intervalOr.cpp.o
+[106/124] Building CXX object CMakeFiles/signals.dir/interval/intervalNot.cpp.o
+[107/124] Building CXX object CMakeFiles/signals.dir/interval/intervalPow.cpp.o
+/Users/yannorlarey/Documents/Install/signals/interval/intervalPow.cpp:194:15: warning: unused function 'myfPow' [-Wunused-function]
+  194 | static double myfPow(double x, double y)
+      |               ^~~~~~
+1 warning generated.
+[108/124] Building CXX object CMakeFiles/signals.dir/interval/intervalRemainder.cpp.o
+[109/124] Building CXX object CMakeFiles/signals.dir/interval/intervalRint.cpp.o
+[110/124] Building CXX object CMakeFiles/signals.dir/interval/intervalRound.cpp.o
+[111/124] Building CXX object CMakeFiles/signals.dir/interval/intervalRsh.cpp.o
+[112/124] Building CXX object CMakeFiles/signals.dir/interval/intervalSin.cpp.o
+/Users/yannorlarey/Documents/Install/signals/interval/intervalSin.cpp:30:15: warning: unused function 'sinPi' [-Wunused-function]
+   30 | static double sinPi(double x)
+      |               ^~~~~
+1 warning generated.
+[113/124] Building CXX object CMakeFiles/signals.dir/interval/intervalSinh.cpp.o
+[114/124] Building CXX object CMakeFiles/signals.dir/interval/intervalSqrt.cpp.o
+[115/124] Building CXX object CMakeFiles/signals.dir/interval/intervalTan.cpp.o
+/Users/yannorlarey/Documents/Install/signals/interval/intervalTan.cpp:30:15: warning: unused function 'tanPi' [-Wunused-function]
+   30 | static double tanPi(double x)
+      |               ^~~~~
+1 warning generated.
+[116/124] Building CXX object CMakeFiles/signals.dir/interval/intervalVSlider.cpp.o
+[117/124] Building CXX object CMakeFiles/signals.dir/interval/intervalSub.cpp.o
+[118/124] Building CXX object CMakeFiles/signals.dir/interval/intervalTanh.cpp.o
+[119/124] Building CXX object CMakeFiles/signals.dir/interval/intervalXor.cpp.o
+[120/124] Building CXX object CMakeFiles/signals.dir/interval/interval_algebra.cpp.o
+[121/124] Linking CXX static library libsignals.a
+[122/124] Building CXX object CMakeFiles/signals-tests.dir/tests/tests.cpp.o
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:235:27: warning: unused variable 'w' [-Wunused-variable]
+  235 |         Tree X = nullptr, w, body_;
+      |                           ^
+/Users/yannorlarey/Documents/Install/signals/tests/tests.cpp:235:30: warning: unused variable 'body_' [-Wunused-variable]
+  235 |         Tree X = nullptr, w, body_;
+      |                              ^~~~~
+2 warnings generated.
+[123/124] Linking CXX executable signals-tests

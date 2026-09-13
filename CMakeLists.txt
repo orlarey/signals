@@ -26,27 +26,28 @@ endif()
 # because tlib itself now depends on it -- header-only, nothing to compile.
 # CONFIGURE_DEPENDS keeps the source list in sync with the directories (the
 # interval standalone project taught us the cost of a stale explicit list).
-file(GLOB SIGNALS_SRC   CONFIGURE_DEPENDS signals/*.cpp)
+file(GLOB_RECURSE SIGNALS_SRC CONFIGURE_DEPENDS signals/*.cpp)
 file(GLOB TLIB_SRC      CONFIGURE_DEPENDS tlib/*.cpp)
 file(GLOB INTERVAL_SRC  CONFIGURE_DEPENDS interval/*.cpp)
-file(GLOB NORMALIZE_SRC CONFIGURE_DEPENDS normalize/*.cpp)
-file(GLOB TRANSFORM_SRC CONFIGURE_DEPENDS transform/*.cpp)
 
 # the library
 add_library(signals STATIC
     ${SIGNALS_SRC}
     ${TLIB_SRC}
-    ${INTERVAL_SRC}
-    ${NORMALIZE_SRC}
-    ${TRANSFORM_SRC})
+    ${INTERVAL_SRC})
 
 # "." first so that "interval/interval_def.hh"-style prefixed includes
 # resolve; the rest is the flat include model shared with the Faust compiler.
 target_include_directories(signals PUBLIC
     .
-    signals
-    normalize
-    transform
+    signals/terms
+    signals/types
+    signals/traverse
+    signals/analysis
+    signals/normalize
+    signals/forms
+    signals/passes
+    signals/session
     interval
     FaustAlgebra
     tlib
@@ -56,3 +57,10 @@ target_include_directories(signals PUBLIC
 add_executable(signals-tests tests/tests.cpp)
 target_link_libraries(signals-tests PRIVATE signals)
 add_test(NAME signals-tests COMMAND signals-tests)
+
+# The layering rule of the signal library : a layer of signals/ includes only the
+# layers listed before it (tests/layers.py holds the order and checks the #includes).
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if (Python3_Interpreter_FOUND)
+    add_test(NAME signals-layers COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/layers.py ${CMAKE_CURRENT_SOURCE_DIR}/signals)
+endif()

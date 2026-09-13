@@ -1,0 +1,4 @@
+[0/2] Re-checking globbed directories...
+[1/4] Building CXX object CMakeFiles/signals.dir/signals/sigs-config.cpp.o
+[2/4] Linking CXX static library libsignals.a
+[3/4] Linking CXX executable signals-tests
