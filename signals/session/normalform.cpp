@@ -353,11 +353,12 @@ static bool containsNode(Tree t, Tree g, std::map<Tree, bool, treeorder>& memo)
  * Chains harvest themselves across loop iterations: replacing proj_k everywhere
  * (inside other definitions too) frees their referencers for the next round.
  */
-static Tree degroupInvariants(Tree L)
+static Tree degroupInvariants(Tree L, int* harvested = nullptr)
 {
     // one containment memo PER GROUP: a subtree can be g1-free yet contain g2
     std::map<Tree, std::map<Tree, bool, treeorder>, treeorder> memos;
-    return treeRewrite(L, [&memos](Tree r) -> Tree {
+    int n = 0;  // projections replaced by their definition
+    Tree R = treeRewrite(L, [&memos, &n](Tree r) -> Tree {
         int  i;
         Tree g;
         if (isProj(r, i, g)) {
@@ -365,12 +366,17 @@ static Tree degroupInvariants(Tree L)
             if (isRec(g, var, body) && body != nullptr) {
                 Tree def = nth(body, i);
                 if (def != nullptr && !isNil(def) && !containsNode(def, g, memos[g])) {
+                    n++;
                     return def;
                 }
             }
         }
         return r;
     });
+    if (harvested) {
+        *harvested = n;
+    }
+    return R;
 }
 
 /// Count the distinct recursive groups reachable from t (SYMREC nodes, definitions
@@ -422,7 +428,11 @@ static Tree normalizeFixpoint(Tree L)
     // the loop before the budget is spent.
     const int maxIter = sigs::g.gEtaIterations;
     while (iter < maxIter) {
-        Tree d = sym2deBruijn(L);
+        // the tree before this iteration : an iteration that harvests nothing
+        // is UNDONE (see below), so that the default normal form of a program
+        // with no false recursive definition is the plain normal form
+        const Tree L0 = L;
+        Tree       d  = sym2deBruijn(L);
         if (d == prev) {
             break;  // the de Bruijn form is pointer-stable: fixpoint reached
         }
@@ -457,8 +467,32 @@ static Tree normalizeFixpoint(Tree L)
             // next one -- the AC judge stops at their joint fixpoint.
             L = normalizeRecGroups(L, false);
         }
-        // the eta rule: harvest the definitions the simplifications made invariant
-        Tree Lh = degroupInvariants(L);
+        // the eta rule: harvest the definitions the simplifications made invariant.
+        // The loop runs by default until an iteration harvests nothing and changes
+        // nothing that counts (the AC judge above), under a safety cap (-etai) :
+        // a false recursive definition never survives the normal form.
+        int  harvested = 0;
+        Tree Lh        = degroupInvariants(L, &harvested);
+        {
+            std::ostringstream os;
+            os << "eta iteration " << (iter + 1) << " : " << harvested << " projection(s) harvested";
+            const std::string label = os.str();
+            sigs::startTiming(label.c_str());
+            sigs::endTiming(label.c_str());
+        }
+        if (harvested == 0) {
+            // nothing to harvest : this iteration's merge (the de Bruijn round
+            // trip renames every group from its content, and every name-derived
+            // order with it), its re-simplification and its promotion are NOT a
+            // normal form the program asked for -- kept, they changed the emitted
+            // code of 94 impulse programs out of 96 for no harvest (reverbDesigner
+            // : 743 lines, 650 -> 757 temporaries, +45 % under g++ ; the
+            // campaign V14a saw a +-45 % lottery on 121 programs). Restore the
+            // tree of before the iteration and stop : the previous iteration, if
+            // any, harvested and left a promoted tree.
+            L = L0;
+            break;
+        }
         if (Lh != L) {
             // a harvest substitutes definition trees for projections, creating
             // compositions (nested delays, foldable constants) the backends must
@@ -475,8 +509,14 @@ static Tree normalizeFixpoint(Tree L)
     }
 
     const int groupsAfter = countRecGroups(L);
-    std::cerr << "NORMFIX : " << iter << " iteration(s), " << groupsBefore << " -> "
-              << groupsAfter << " recursive group(s)" << std::endl;
+    {
+        std::ostringstream os;
+        os << "eta fixpoint : " << iter << " iteration(s), " << groupsBefore << " -> " << groupsAfter
+           << " recursive group(s)";
+        const std::string label = os.str();
+        sigs::startTiming(label.c_str());
+        sigs::endTiming(label.c_str());
+    }
     return L;
 }
 
