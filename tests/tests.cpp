@@ -357,8 +357,16 @@ int main()
     check(ts->getInterval().lo() == 0.0 && ts->getInterval().hi() == 1.0,
           "interval: slider in [0, 1]");
 
-    // input + 0.5 is [-0.5, 1.5], times slider [0, 1] -> product in [-0.5, 1.5]
-    check(t->getInterval().lo() >= -0.5 && t->getInterval().hi() <= 1.5,
+    // an audio input has no assumed range : input * slider is unbounded
+    check(t->getInterval().isUnbounded(), "interval: input * slider is unbounded");
+
+    // a bounded operand instead : (bipolar + 0.5) is [-0.5, 1.5], times slider [0, 1]
+    // -> product in [-0.5, 1.5]
+    Tree bipolar = sigVSlider(tree("\"bipolar\""), sigReal(0), sigReal(-1), sigReal(1), sigReal(0.01));
+    Tree prod    = sigMul(sigAdd(bipolar, sigReal(0.5)), slider);
+    typeAnnotation(prod, false);
+    Type tp = getCertifiedSigType(prod);
+    check(tp->getInterval().lo() >= -0.5 && tp->getInterval().hi() <= 1.5,
           "interval: product bounded by [-0.5, 1.5]");
 
     // --- integer signals ----------------------------------------------------
