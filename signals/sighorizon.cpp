@@ -908,18 +908,30 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         double amp2 = 0, u2 = 0;
         bool   invalid = false;
         for (int i = 0; i < 2; i++) {
-            double a = 0, uu = 0;
+            // the flattened sum may have split an impulse k - k' into a constant k and a
+            // constant delayed by one sample : they cancel from the second sample on
+            double a = 0, uu = 0, cst = 0, late = 0;
             for (const auto& [t, sign] : inputs[i]) {
                 double k;
+                Tree   d, n;
                 if (impulseAmplitude(t, k)) {
                     a += k;
-                    continue;
+                } else if (constNum(t, k)) {
+                    cst += sign * k;
+                } else if (isSigDelay(t, d, n) && constNum(n, k) && k == 1 && constNum(d, k)) {
+                    late += sign * k;
+                } else {
+                    const AffItv   v  = ev.eval(t);
+                    const interval iv = itv::toItv(v, fT);
+                    if (iv.isEmpty() || !iv.isBounded()) return rot;
+                    invalid = invalid || v.mayBeInvalid;
+                    uu += std::max(std::abs(iv.lo()), std::abs(iv.hi()));
                 }
-                const AffItv   v  = ev.eval(t);
-                const interval iv = itv::toItv(v, fT);
-                if (iv.isEmpty() || !iv.isBounded()) return rot;
-                invalid = invalid || v.mayBeInvalid;
-                uu += std::max(std::abs(iv.lo()), std::abs(iv.hi()));
+            }
+            if (cst + late == 0) {
+                a += std::abs(cst);  // the impulse cst at the first sample, 0 after
+            } else {
+                uu += std::abs(cst) + std::abs(late);
             }
             amp2 += a * a;
             u2 += uu * uu;
