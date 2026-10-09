@@ -60,3 +60,13 @@ target_include_directories(signals PUBLIC
 add_executable(signals-tests tests/tests.cpp)
 target_link_libraries(signals-tests PRIVATE signals)
 add_test(NAME signals-tests COMMAND signals-tests)
+
+# the intervals of the horizon typing : precision, validity, and inclusion of the
+# values an evaluator computes (float and double, with and without fused multiply-adds)
+add_executable(intervals-tests tests/intervals-tests.cpp)
+target_link_libraries(intervals-tests PRIVATE signals)
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # the evaluator rounds each operation apart, and fuses only where it says so
+    set_source_files_properties(tests/intervals-tests.cpp PROPERTIES COMPILE_FLAGS "-ffp-contract=off")
+endif ()
+add_test(NAME intervals-tests COMMAND intervals-tests)
