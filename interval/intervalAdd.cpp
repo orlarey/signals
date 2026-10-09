@@ -19,6 +19,7 @@
 #include "check.hh"
 #include "interval_algebra.hh"
 #include "interval_def.hh"
+#include "directed_rounding.hh"
 
 namespace itv {
 
@@ -35,13 +36,16 @@ static double addint(double x, double y)
     return (int)x + (int)y;
 }
 
-interval interval_algebra::Add(const interval& x, const interval& y) const
+// Numeric kernel: enclose addition; float/double floating bounds round outward at each
+// endpoint, while the existing int32 wrapping and other precision paths remain.
+interval interval_algebra::numericAdd(const interval& xIn, const interval& yIn) const
 {
+    const auto [x, y] = detail::int32Operands(xIn, yIn);
     if (x.isEmpty() || y.isEmpty()) {
         return empty();
     }
 
-    if ((x.lsb() >= 0) && (y.lsb() >= 0)) {  // if both intervals are integers
+    if (detail::hasInt32Bounds(x) && detail::hasInt32Bounds(y)) {
         // if we're dealing with integers the interval has to wrap around 0
         const int xlo = (int)x.lo();
         const int xhi = (int)x.hi();
@@ -72,6 +76,14 @@ interval interval_algebra::Add(const interval& x, const interval& y) const
         return {(double)(xlo + ylo), (double)(xhi + yhi), std::min(x.lsb(), y.lsb())};
     }
 
+    if (detail::usesNativeBounds()) {
+        const interval a = detail::floatingOperand(x), b = detail::floatingOperand(y);
+        const double lo = detail::directedBinary(detail::BinaryOp::Add, a.lo(), b.lo(), detail::Direction::Down);
+        const double hi = detail::directedBinary(detail::BinaryOp::Add, a.hi(), b.hi(), detail::Direction::Up);
+        // An indeterminate infinite corner must not erase numeric interior values.
+        if (std::isnan(lo) || std::isnan(hi)) return {-HUGE_VAL, HUGE_VAL, -24};
+        return {lo, hi, detail::floatingLSB(std::min(x.lsb(), y.lsb()))};
+    }
     return {x.lo() + y.lo(), x.hi() + y.hi(),
             std::min(x.lsb(), y.lsb())};  // the result of an addition needs to be only as precise
                                           // as the most precise of the operands

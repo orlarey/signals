@@ -31,6 +31,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -59,6 +60,19 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
 
     /// Probe results, keyed by proj(b, var). Mutable: engine feedback, not denotation.
     mutable std::unordered_map<Tree, std::pair<AffItv, bool>> fProbe;
+
+    /// Widening history, keyed by proj(b, var): the previous iterate and the number of
+    /// extrapolation rounds spent. Mutable: engine feedback, not denotation.
+    struct Extrapolation {
+        AffItv old, fresh;  ///< the previous widening call : an iterate and its image
+        int    rounds = 0;
+    };
+    mutable std::unordered_map<Tree, Extrapolation> fExtrapolation;
+
+    /// Memos of the cheap filters of the sum rules (hasRoundingTerm, hasComplementTerm) :
+    /// flattening every node of a long sum chain would be quadratic.
+    mutable std::unordered_map<Tree, bool> fHasRoundingTerm, fHasComplementTerm;
+    static constexpr int kExtrapolationRounds = 4;  // one to record, three to extrapolate
 
     static double horizonFromEnv()
     {
@@ -92,6 +106,1012 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     }
 
    public:
+    //--- helpers : the shapes the rules recognize -------------------------------------
+
+    /// t is a numeric constant, integer or real
+    static bool constNum(Tree t, double& v)
+    {
+        int    i;
+        double r;
+        if (isSigInt(t, &i)) {
+            v = i;
+            return true;
+        }
+        if (isSigReal(t, &r)) {
+            v = r;
+            return true;
+        }
+        return false;
+    }
+
+    /// t is the constant 1, integer or real
+    static bool isOneConst(Tree t)
+    {
+        double r;
+        int    i;
+        return (isSigReal(t, &r) && r == 1.0) || (isSigInt(t, &i) && i == 1);
+    }
+
+    /// a and b are the same expression, a numeric constant matching its value whatever
+    /// its type (the normal form may write -1 and -1.0 for one value)
+    static bool sameValue(Tree a, Tree b, int depth = 0)
+    {
+        if (a == b) return true;
+        double x, y;
+        if (constNum(a, x) && constNum(b, y)) return x == y;
+        if (depth > 32 || a->node() != b->node() || a->arity() != b->arity()) return false;
+        for (int i = 0; i < a->arity(); i++) {
+            if (!sameValue(a->branch(i), b->branch(i), depth + 1)) return false;
+        }
+        return true;
+    }
+
+    /// t is *(-1, x) : a negation, in the -fir form
+    static bool negationOf(Tree t, Tree& x)
+    {
+        int    op;
+        Tree   a, b;
+        double k;
+        if (!isSigBinOp(t, &op, a, b) || op != kMul) return false;
+        if (constNum(a, k) && k == -1) {
+            x = b;
+            return true;
+        }
+        if (constNum(b, k) && k == -1) {
+            x = a;
+            return true;
+        }
+        return false;
+    }
+
+    /// t is a sum : a binary + or -, or the n-ary Sum of the -fir form
+    static bool isSum(Tree t)
+    {
+        int  op;
+        Tree a, b;
+        return (isSigBinOp(t, &op, a, b) && (op == kAdd || op == kSub)) || isSigSum(t);
+    }
+
+    /// the terms of a sum (binary +, -, the n-ary Sum of the -fir form, negations),
+    /// flattened with their signs
+    static void sumTerms(Tree t, int sign, std::vector<std::pair<Tree, int>>& out)
+    {
+        int  op;
+        Tree a, b;
+        tvec subs;
+        if (isSigBinOp(t, &op, a, b) && (op == kAdd || op == kSub)) {
+            sumTerms(a, sign, out);
+            sumTerms(b, op == kAdd ? sign : -sign, out);
+            return;
+        }
+        if (isSigSum(t, subs)) {
+            for (Tree u : subs) sumTerms(u, sign, out);
+            return;
+        }
+        if (negationOf(t, a)) {
+            sumTerms(a, -sign, out);
+            return;
+        }
+        out.push_back({t, sign});
+    }
+
+    /// the factors of a product, flattened
+    static void productFactors(Tree t, std::vector<Tree>& out)
+    {
+        int  op;
+        Tree x, y;
+        if (isSigBinOp(t, &op, x, y) && op == kMul) {
+            productFactors(x, out);
+            productFactors(y, out);
+            return;
+        }
+        out.push_back(t);
+    }
+
+    /// t is 1 - c
+    static bool complementOf(Tree t, Tree& c)
+    {
+        int  op;
+        Tree a, b;
+        if (isSigBinOp(t, &op, a, b) && op == kSub && isOneConst(a)) {
+            c = b;
+            return true;
+        }
+        return false;
+    }
+
+    /// does the product t (flattened) hold a factor 1 - c
+    static bool hasComplementFactor(Tree t)
+    {
+        int  op;
+        Tree a, b;
+        if (isSigBinOp(t, &op, a, b) && op == kMul) return hasComplementFactor(a) || hasComplementFactor(b);
+        return complementOf(t, a);
+    }
+
+    /// t is abs(x)
+    static bool absArg(Tree t, Tree& x)
+    {
+        if (t->arity() == 1 && sigs::g.gAbsPrim != nullptr &&
+            getUserData(t) == static_cast<void*>(sigs::g.gAbsPrim)) {
+            x = t->branch(0);
+            return true;
+        }
+        return false;
+    }
+
+    /// t is prim(x)
+    static bool primArg(Tree t, xtended* prim, Tree& x)
+    {
+        if (t->arity() == 1 && prim != nullptr && getUserData(t) == static_cast<void*>(prim)) {
+            x = t->branch(0);
+            return true;
+        }
+        return false;
+    }
+
+    /// t is floor(x), rint(x) or ceil(x)
+    static bool roundingOf(Tree t, Tree& x)
+    {
+        double lo, hi;
+        return roundingArg(t, x, lo, hi);
+    }
+
+    // the roundings of the rule : X - floor(X) lies in [0, 1], X - rint(X) in
+    // [-1/2, 1/2], X - ceil(X) in [-1, 0] ; the subtraction is exact in all three
+    // (Sterbenz : the rounded value is within a factor 2 of X, or 0)
+    static bool roundingArg(Tree t, Tree& x, double& lo, double& hi)
+    {
+        if (t->arity() != 1) return false;
+        void* p = getUserData(t);
+        if (p == nullptr) return false;
+        if (p == static_cast<void*>(sigs::g.gFloorPrim)) {
+            lo = 0;
+            hi = 1;
+        } else if (p == static_cast<void*>(sigs::g.gRintPrim)) {
+            lo = -0.5;
+            hi = 0.5;
+        } else if (p == static_cast<void*>(sigs::g.gCeilPrim)) {
+            lo = -1;
+            hi = 0;
+        } else {
+            return false;
+        }
+        x = t->branch(0);
+        return true;
+    }
+
+    //--- the remainder of a rounding --------------------------------------------------
+
+    // The fractional part x - floor(x) of a finite x lies in [0, 1]. The subtraction
+    // of two intervals forgets that both terms read the same x (the dependency
+    // problem) : a phase accumulator ma.frac(x' + inc) widened to [-inf, +inf], and
+    // with it every conversion and table index it feeds. The normal form may have
+    // spread x over the enclosing sum ((inc - floor(inc + x')) + x') : the rule reads
+    // the sum flattened into signed terms, and counts a term floor(X) together with
+    // all the terms of X, of the opposite sign, as frac(X) (or -frac(X)). The same
+    // holds for the remainders of the other roundings, X - rint(X) in [-1/2, 1/2]
+    // (the fixed-point phasor of the libraries) and X - ceil(X) in [-1, 0].
+    //
+    // The interval holds the values the program computes, not the real fractional
+    // part. Computed as X - floor(X) with X rounded once, the result is exact (floor(X)
+    // is 0 below 1, and within a factor 2 of X above : Sterbenz) and lies in [0, 1[,
+    // [0, 1] for a negative X. But the program may compute the terms of X in another
+    // order than the one inside floor, and a multiply-add contraction may round a
+    // product inside floor and not outside : the two readings of X then differ by
+    // a few rounding errors, and the result may leave [0, 1] by as much (a phase just
+    // below 0 when X rounds up to an integer). The rule widens [0, 1] by that bound :
+    // three times the error of a sum of n terms, gamma(n) * sum |t_i|, plus the loss
+    // of a flush to zero on each addition. In the plain form X - floor(X), X one
+    // term, only a contraction of the product computing X is left : half an ulp of X.
+    // An X that may be infinite or invalid gives a possible NaN (inf - inf).
+
+    /// frac(X) recognized in the sum sig, or nothing ; the remaining terms are added
+    bool fractionalSum(Tree sig, FixPointEvaluator<AffItv>& ev, AffItv& result) const
+    {
+        std::vector<std::pair<Tree, int>> terms;
+        sumTerms(sig, 1, terms);
+        for (size_t i = 0; i < terms.size(); i++) {
+            Tree   x;
+            double rlo, rhi;
+            if (!roundingArg(terms[i].first, x, rlo, rhi)) continue;
+            const int                         s = terms[i].second;
+            std::vector<std::pair<Tree, int>> xs;
+            sumTerms(x, 1, xs);
+            std::vector<char> used(terms.size(), 0);
+            used[i]  = 1;
+            bool all = true;
+            for (const auto& [u, e] : xs) {
+                bool found = false;
+                for (size_t j = 0; j < terms.size(); j++) {
+                    if (!used[j] && terms[j].first == u && terms[j].second == -s * e) {
+                        used[j] = 1;
+                        found   = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    all = false;
+                    break;
+                }
+            }
+            if (!all) continue;
+
+            const AffItv ax = ev.eval(x);
+            if (ax.isEmpty()) return false;
+            const interval ix = itv::toItv(ax, fT);
+            // the magnitude of every term of the sum, floor(X) included
+            double mag = std::max(std::abs(ix.lo()), std::abs(ix.hi())) + 1;
+            for (size_t j = 0; j < terms.size(); j++) {
+                if (j == i) continue;
+                const interval it = itv::toItv(ev.eval(terms[j].first), fT);
+                if (it.isEmpty()) return false;
+                mag += std::max(std::abs(it.lo()), std::abs(it.hi()));
+            }
+            if (!std::isfinite(mag)) return false;
+            const double n     = double(terms.size());
+            const double u     = itv::programPrecision() == 2 ? std::ldexp(1.0, -53) : std::ldexp(1.0, -24);
+            const double gamma = n * u / (1 - n * u);
+            double       eps   = (3 * gamma * mag + n * std::ldexp(1.0, -125)) * (1 + std::ldexp(1.0, -20));
+            // The plain form X - floor(X), X one term : the subtraction is exact (Sterbenz,
+            // for X >= 0 and X <= -1 ; between, the result rounds within [0, 1]). The
+            // only error left is a multiply-add contraction of the product that computes
+            // X, taken exactly on one side and rounded inside floor : half an ulp of X.
+            int  bop;
+            Tree ba, bb;
+            if (terms.size() == 2 && xs.size() == 1) {
+                const bool product = isSigBinOp(x, &bop, ba, bb) && bop == kMul;
+                const double xmag  = std::max(std::abs(ix.lo()), std::abs(ix.hi()));
+                eps = product ? u * xmag * (1 + std::ldexp(1.0, -20)) + std::ldexp(1.0, -125) : 0;
+            }
+            const bool   ok    = !ax.mayBeInvalid && std::isfinite(ix.lo()) && std::isfinite(ix.hi());
+
+            AffItv acc = itv::fromItv(interval(rlo - eps, rhi + eps, std::min(ix.lsb(), -1), !ok));
+            if (s > 0) acc = this->Neg(acc);  // round(X) - X = -(X - round(X))
+            for (size_t j = 0; j < terms.size(); j++) {
+                if (used[j]) continue;
+                const AffItv v = ev.eval(terms[j].first);
+                acc            = terms[j].second > 0 ? this->Add(acc, v) : this->Sub(acc, v);
+            }
+            result = acc;
+            return true;
+        }
+        return false;
+    }
+
+    /// Cheap filter of the fractional rule, memoized : does the sum rooted at t hold a
+    /// rounding (floor, rint or ceil) term ? The rule flattens a sum only when it does.
+    bool hasRoundingTerm(Tree t) const
+    {
+        auto it = fHasRoundingTerm.find(t);
+        if (it != fHasRoundingTerm.end()) return it->second;
+        int  op;
+        Tree a, b;
+        bool r;
+        tvec subs;
+        if (isSigBinOp(t, &op, a, b) && (op == kAdd || op == kSub)) {
+            r = hasRoundingTerm(a) || hasRoundingTerm(b);
+        } else if (isSigSum(t, subs)) {
+            r = false;
+            for (Tree u : subs) r = r || hasRoundingTerm(u);
+        } else if (negationOf(t, a)) {
+            r = hasRoundingTerm(a);
+        } else {
+            r = roundingOf(t, a);
+        }
+        return fHasRoundingTerm[t] = r;
+    }
+
+    //--- the convex mix ---------------------------------------------------------------
+
+    // A convex mix (1 - c) * A + c * B with c in [0, 1] lies between A and B : the
+    // one-pole smoother y = (1 - p) * x + p * y' and every crossfade. The product of
+    // two intervals forgets that both weights read the same c, and a smoother of a
+    // control in [-12, 12] widened to [-2^30, 2^30]. The rule finds, in the sum
+    // flattened into signed terms, two products whose weights are c and 1 - c (the
+    // same tree c), and types them together : for a fixed c the mix is linear in c,
+    // so its extremes over c are reached at the two ends of c's interval. Both ends
+    // are computed in double ; a margin of 3 rounding errors of the largest operand
+    // covers the program, which rounds 1 - c, the two products and the sum in its own
+    // precision, at any value of c. The rule needs bounded A and B (an infinite
+    // operand times a zero weight is a NaN).
+
+    /// t1 is (1 - c) * A and t2 is c * B, the products flattened into factors (the normal
+    /// form gathers constants : 440 * (pow(..) * (1 - c))) ; A and B are the remaining
+    /// factors of each product
+    static bool mixWeights(Tree t1, Tree t2, Tree& c, std::vector<Tree>& a, std::vector<Tree>& b)
+    {
+        std::vector<Tree> f1, f2;
+        productFactors(t1, f1);
+        productFactors(t2, f2);
+        if (f1.size() < 2 || f2.size() < 2) return false;
+        for (size_t i = 0; i < f1.size(); i++) {
+            Tree k;
+            if (!complementOf(f1[i], k)) continue;
+            for (size_t j = 0; j < f2.size(); j++) {
+                if (!sameValue(f2[j], k)) continue;
+                c = k;
+                a.clear();
+                b.clear();
+                for (size_t m = 0; m < f1.size(); m++) {
+                    if (m != i) a.push_back(f1[m]);
+                }
+                for (size_t m = 0; m < f2.size(); m++) {
+                    if (m != j) b.push_back(f2[m]);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// the product of the factors' values
+    AffItv productOf(const std::vector<Tree>& fs, FixPointEvaluator<AffItv>& ev) const
+    {
+        AffItv r = ev.eval(fs[0]);
+        for (size_t i = 1; i < fs.size(); i++) r = this->Mul(r, ev.eval(fs[i]));
+        return r;
+    }
+
+    /// the mix (1 - c) A + c B over c in ic, with the rounding of the program
+    AffItv mixOf(const interval& ic, const AffItv& aa, const AffItv& ab) const
+    {
+        const interval ia = itv::toItv(aa, fT), ib = itv::toItv(ab, fT);
+        // The exact mix at the two ends of c, computed in double : the weights are
+        // nonnegative, so the extremes take the extreme operands. Its own rounding
+        // (two products and a sum in double) is covered by a 2^-50 relative slack.
+        double lo = HUGE_VAL, hi = -HUGE_VAL;
+        for (double e : {ic.lo(), ic.hi()}) {
+            const double w = 1 - e;
+            lo             = std::min(lo, w * ia.lo() + e * ib.lo());
+            hi             = std::max(hi, w * ia.hi() + e * ib.hi());
+        }
+        // The program computes 1 - c, two products and a sum in its own precision : at
+        // most 3 rounding errors of the largest operand, once (the double slack covers
+        // the exact ends, this margin covers the program and the values of c in between).
+        const double mag = std::max({std::abs(ia.lo()), std::abs(ia.hi()), std::abs(ib.lo()), std::abs(ib.hi())});
+        const double u   = itv::programPrecision() == 2 ? std::ldexp(1.0, -53) : std::ldexp(1.0, -24);
+        const double eps = (3 * u + std::ldexp(1.0, -50)) * mag + std::ldexp(1.0, -122);
+        // the weights are nonnegative floats : a mix of nonnegative operands stays
+        // nonnegative whatever the rounding (and symmetrically), so the margin never
+        // crosses zero
+        double rlo = lo - eps, rhi = hi + eps;
+        if (ia.lo() >= 0 && ib.lo() >= 0) rlo = std::max(rlo, 0.0);
+        if (ia.hi() <= 0 && ib.hi() <= 0) rhi = std::min(rhi, 0.0);
+        const int lsb = std::min({ic.lsb(), ia.lsb(), ib.lsb()});
+        return itv::fromItv(interval(rlo, rhi, lsb, aa.mayBeInvalid || ab.mayBeInvalid || ic.mayBeInvalid()));
+    }
+
+    /// a convex mix recognized in the sum sig, or nothing ; the remaining terms are added
+    bool mixSum(Tree sig, FixPointEvaluator<AffItv>& ev, AffItv& result) const
+    {
+        std::vector<std::pair<Tree, int>> terms;
+        sumTerms(sig, 1, terms);
+        for (size_t i = 0; i < terms.size(); i++) {
+            for (size_t j = 0; j < terms.size(); j++) {
+                if (i == j || terms[i].second != terms[j].second) continue;
+                Tree              c;
+                std::vector<Tree> a, b;
+                if (!mixWeights(terms[i].first, terms[j].first, c, a, b)) continue;
+                const interval ic = itv::toItv(ev.eval(c), fT);
+                if (ic.isEmpty() || ic.lo() < 0 || ic.hi() > 1) continue;
+                const AffItv   aa = productOf(a, ev), ab = productOf(b, ev);
+                const interval ia = itv::toItv(aa, fT), ib = itv::toItv(ab, fT);
+                if (ia.isEmpty() || ib.isEmpty() || !ia.isBounded() || !ib.isBounded()) continue;
+                AffItv acc = mixOf(ic, aa, ab);
+                if (terms[i].second < 0) acc = this->Neg(acc);
+                for (size_t k = 0; k < terms.size(); k++) {
+                    if (k == i || k == j) continue;
+                    const AffItv v = ev.eval(terms[k].first);
+                    acc            = terms[k].second > 0 ? this->Add(acc, v) : this->Sub(acc, v);
+                }
+                result = acc;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Cheap filter of the mix rule, memoized : does the sum rooted at t hold a product
+    /// with a factor 1 - c ?
+    bool hasComplementTerm(Tree t) const
+    {
+        auto it = fHasComplementTerm.find(t);
+        if (it != fHasComplementTerm.end()) return it->second;
+        int  op;
+        Tree a, b;
+        bool r;
+        tvec subs;
+        if (isSigBinOp(t, &op, a, b) && (op == kAdd || op == kSub)) {
+            r = hasComplementTerm(a) || hasComplementTerm(b);
+        } else if (isSigSum(t, subs)) {
+            r = false;
+            for (Tree u : subs) r = r || hasComplementTerm(u);
+        } else {
+            r = hasComplementFactor(t);
+        }
+        return fHasComplementTerm[t] = r;
+    }
+
+    //--- select2 typed under its condition --------------------------------------------
+
+    // A select2 whose condition compares a value with a constant guards one branch
+    // with that comparison : select2(abs(t) < eps, t, 1) never divides by a t near
+    // zero, select2(T60 > 0, 0, exp(-1/T60)) never reads the pole of a zero T60. The
+    // join of the two branches forgets the guard. The rule types each branch under
+    // its side of the condition : the constraint on the compared value is carried
+    // backwards to the values it is computed from (through a product or a quotient
+    // by a constant, a sum with a constant, abs), and the branch is evaluated again
+    // with these refined values. The condition holds at the current sample only : the
+    // evaluation never refines through a delay, a recursion or a table, which read
+    // the past ; nor through integer arithmetic, which may wrap. A NaN fails every
+    // comparison : the false side is refined only for a value that cannot be NaN.
+    // Both branches are computed by the program whichever is chosen : the validity
+    // alert stays the one of the unrefined branches.
+    using Overrides = std::unordered_map<Tree, AffItv>;
+
+    /// the next program value after k in the direction dir (integers step by one)
+    static double step(double k, bool integer, double dir)
+    {
+        if (integer) return dir > 0 ? std::floor(k) + 1 : std::ceil(k) - 1;
+        if (itv::programPrecision() == 2) return std::nextafter(k, dir * HUGE_VAL);
+        return double(std::nextafter(float(k), float(dir * HUGE_VAL)));
+    }
+
+    /// the values of L for which (L op k) has the given truth, or nothing (no refinement)
+    static std::optional<interval> sideOf(int op, double k, bool truth, bool integer)
+    {
+        const double inf = HUGE_VAL;
+        switch (op) {
+            case kGT: return truth ? interval(step(k, integer, 1), inf) : interval(-inf, k);
+            case kGE: return truth ? interval(k, inf) : interval(-inf, step(k, integer, -1));
+            case kLT: return truth ? interval(-inf, step(k, integer, -1)) : interval(k, inf);
+            case kLE: return truth ? interval(-inf, k) : interval(step(k, integer, 1), inf);
+            case kEQ: if (truth) return interval(k, k); return std::nullopt;
+            case kNE: if (!truth) return interval(k, k); return std::nullopt;
+            default: return std::nullopt;
+        }
+    }
+
+    static int mirror(int op)
+    {
+        switch (op) {
+            case kGT: return kLT;
+            case kLT: return kGT;
+            case kGE: return kLE;
+            case kLE: return kGE;
+            default: return op;
+        }
+    }
+
+    /// x such that x * k lies in n, for a float x : a relative margin covers the
+    /// rounding of the product, and the sign survives it (a product by a nonzero k
+    /// never changes sign, it may only underflow to zero)
+    static interval inverseScale(const interval& n, double k)
+    {
+        double       lo = n.lo() / k, hi = n.hi() / k;
+        if (k < 0) std::swap(lo, hi);
+        const double m  = std::ldexp(1.0, -20);
+        double       rl = lo - std::abs(lo) * m, rh = hi + std::abs(hi) * m;
+        const double tiny = itv::programPrecision() == 2 ? std::numeric_limits<double>::denorm_min()
+                                                         : double(std::numeric_limits<float>::denorm_min());
+        if (lo > 0) rl = std::max(rl, tiny);
+        if (hi < 0) rh = std::min(rh, -tiny);
+        return interval(rl, rh);
+    }
+
+    void narrowTo(Tree t, const interval& target, Overrides& ov, FixPointEvaluator<AffItv>& ev,
+                  int depth) const
+    {
+        auto           known = ov.find(t);
+        const interval cur   = itv::toItv(known != ov.end() ? known->second : ev.eval(t), fT);
+        if (cur.isEmpty()) return;
+        interval n = itv::intersection(cur, interval(target.lo(), target.hi(), cur.lsb()));
+        n          = interval(n.lo(), n.hi(), cur.lsb(), cur.mayBeInvalid());
+        if (target.lo() > target.hi() || n.lo() > n.hi()) {
+            ov[t] = itv::aempty();
+            return;
+        }
+        ov[t] = itv::fromItv(n);
+        if (depth >= 8 || cur.lsb() >= 0) return;  // integer arithmetic may wrap
+        int    op;
+        Tree   x, y;
+        double k;
+        if (isSigBinOp(t, &op, x, y)) {
+            if (op == kMul && constNum(y, k) && k != 0) narrowTo(x, inverseScale(n, k), ov, ev, depth + 1);
+            if (op == kMul && constNum(x, k) && k != 0) narrowTo(y, inverseScale(n, k), ov, ev, depth + 1);
+            if (op == kDiv && constNum(y, k) && k != 0 && std::isfinite(1 / k)) {
+                narrowTo(x, inverseScale(n, 1 / k), ov, ev, depth + 1);
+            }
+            const double m = std::ldexp(1.0, -20);
+            auto shifted = [m](double lo, double hi) {
+                return interval(lo - std::abs(lo) * m - std::ldexp(1.0, -1000), hi + std::abs(hi) * m + std::ldexp(1.0, -1000));
+            };
+            if (op == kAdd && constNum(y, k)) narrowTo(x, shifted(n.lo() - k, n.hi() - k), ov, ev, depth + 1);
+            if (op == kAdd && constNum(x, k)) narrowTo(y, shifted(n.lo() - k, n.hi() - k), ov, ev, depth + 1);
+            if (op == kSub && constNum(y, k)) narrowTo(x, shifted(n.lo() + k, n.hi() + k), ov, ev, depth + 1);
+            if (op == kSub && constNum(x, k)) narrowTo(y, shifted(k - n.hi(), k - n.lo()), ov, ev, depth + 1);
+            return;
+        }
+        if (absArg(t, x)) {
+            // abs is the value itself on a nonnegative x, its opposite on a nonpositive
+            // one ; otherwise the value or its opposite
+            const interval ix = itv::toItv(ev.eval(x), fT);
+            if (ix.isEmpty()) return;
+            if (ix.lo() >= 0) {
+                narrowTo(x, n, ov, ev, depth + 1);
+            } else if (ix.hi() <= 0) {
+                narrowTo(x, interval(-n.hi(), -n.lo()), ov, ev, depth + 1);
+            } else {
+                narrowTo(x, interval(-n.hi(), n.hi()), ov, ev, depth + 1);
+            }
+        }
+    }
+
+    /// the trees narrowTo may refine below v : the structure of the backward steps
+    static void chainOf(Tree t, std::unordered_set<Tree>& keys, int depth)
+    {
+        keys.insert(t);
+        if (depth >= 8) return;
+        int    op;
+        Tree   x, y;
+        double k;
+        if (isSigBinOp(t, &op, x, y)) {
+            if ((op == kMul || op == kAdd) && constNum(y, k)) chainOf(x, keys, depth + 1);
+            if ((op == kMul || op == kAdd) && constNum(x, k)) chainOf(y, keys, depth + 1);
+            if ((op == kDiv || op == kSub) && constNum(y, k)) chainOf(x, keys, depth + 1);
+            if (op == kSub && constNum(x, k)) chainOf(y, keys, depth + 1);
+            return;
+        }
+        if (absArg(t, x)) chainOf(x, keys, depth + 1);
+    }
+
+    /// Per compared value v, the structural part of a refinement : the trees a
+    /// condition on v may refine, and which trees read them (memoized across rounds and
+    /// shared by every select2 comparing v : the walk does not depend on the values).
+    struct SelectReads {
+        std::unordered_set<Tree>       keys;
+        std::unordered_map<Tree, bool> reads;
+    };
+    mutable std::unordered_map<Tree, SelectReads> fSelectReads;
+
+    /// does t read a refined value, through instantaneous operations only
+    static bool readsRefined(Tree t, const std::unordered_set<Tree>& keys,
+                             std::unordered_map<Tree, bool>& memo)
+    {
+        if (keys.count(t)) return true;
+        auto it = memo.find(t);
+        if (it != memo.end()) return it->second;
+        bool r = false;
+        int  op;
+        Tree x, y, z;
+        const bool instantaneous = isSigBinOp(t, &op, x, y) || isSigIntCast(t, x) ||
+                                   isSigFloatCast(t, x) || isSigSelect2(t, x, y, z) ||
+                                   getUserData(t) != nullptr;
+        if (instantaneous) {
+            for (int j = 0; j < t->arity() && !r; j++) r = readsRefined(t->branch(j), keys, memo);
+        }
+        memo[t] = r;
+        return r;
+    }
+
+    AffItv evalUnder(Tree t, const Overrides& ov, FixPointEvaluator<AffItv>& ev,
+                     SelectReads& sr, Overrides& memo) const
+    {
+        auto o = ov.find(t);
+        if (o != ov.end()) return o->second;
+        if (!readsRefined(t, sr.keys, sr.reads)) return ev.eval(t);
+        auto m = memo.find(t);
+        if (m != memo.end()) return m->second;
+        std::vector<AffItv> kids;
+        kids.reserve(t->arity());
+        for (int j = 0; j < t->arity(); j++) kids.push_back(evalUnder(t->branch(j), ov, ev, sr, memo));
+        // the refined children alone : the rules that read the evaluator directly
+        // (fractional part, mix) are bypassed here, the generic rules are sound
+        const AffItv v = itv::AffineOps<SignalAlgebra<AffItv>>::combine(t, kids, ev);
+        memo[t]        = v;
+        return v;
+    }
+
+    /// select2 typed under its condition, or nothing
+    bool guardedSelect(Tree sig, const std::vector<AffItv>& c, FixPointEvaluator<AffItv>& ev,
+                       AffItv& result) const
+    {
+        Tree sel, s0, s1, l, r;
+        int  op;
+        if (!isSigSelect2(sig, sel, s0, s1)) return false;
+        if (!isSigBinOp(sel, &op, l, r) || op < kGT || op > kNE) return false;
+        double k;
+        Tree   v;
+        if (constNum(r, k)) {
+            v = l;
+        } else if (constNum(l, k)) {
+            v  = r;
+            op = mirror(op);
+        } else {
+            return false;
+        }
+        const interval iv = itv::toItv(ev.eval(v), fT);
+        if (iv.isEmpty()) return false;
+        auto known = fSelectReads.find(v);
+        if (known == fSelectReads.end()) {
+            known = fSelectReads.emplace(v, SelectReads()).first;
+            chainOf(v, known->second.keys, 0);
+        }
+        SelectReads& sr = known->second;
+        AffItv branch[2];
+        bool   refined = false;
+        for (int truth = 0; truth < 2; truth++) {
+            Tree                    s    = truth ? s1 : s0;
+            std::optional<interval> side = sideOf(op, k, truth, iv.lsb() >= 0);
+            if (!side || (!truth && iv.mayBeInvalid())) {
+                branch[truth] = ev.eval(s);
+                continue;
+            }
+            Overrides ov;
+            narrowTo(v, *side, ov, ev, 0);
+            if (itv::toItv(ov[v], fT).isEmpty()) {
+                branch[truth] = itv::aempty();  // this side of the condition never holds
+            } else {
+                Overrides memo;
+                branch[truth] = evalUnder(s, ov, ev, sr, memo);
+            }
+            refined = true;
+        }
+        if (!refined) return false;
+        const bool invalid = c[0].mayBeInvalid || c[1].mayBeInvalid || c[2].mayBeInvalid;
+        result             = itv::ajoin(branch[0], branch[1], fT).withInvalid(invalid);
+        return true;
+    }
+
+    //--- the rotation oscillator ------------------------------------------------------
+
+    // A rotation oscillator : a recursive pair v = (x, y) whose two bodies are
+    //     x = r0 * ( cos(t) * x' + sin(t) * y') + input0
+    //     y = r1 * (-sin(t) * x' + cos(t) * y') + input1
+    // (os.oscrs, nlf2), cos and sin of the same tree t. A box cannot hold a circle : the
+    // smallest box around a rotated box is up to sqrt(2) wider, and the fixpoint of the
+    // two intervals runs away. The rule bounds the RADIUS |v| instead. In exact
+    // arithmetic the rotation keeps it ; in the program, cos and sin are rounded (one
+    // rounding error each, the libm being faithful), and so are the two products,
+    // the sum and the addition of the input : the error of one step is at most
+    // 8 u |v| (u the unit roundoff of the program), the radius grows at most by
+    // rho = max(|r0|, |r1|) * (1 + 8u) per sample. With impulse inputs (k * (1 - 1'))
+    // of norm A and no other input, |v_n| <= rho^n A. If rho < 1 (a damped resonator),
+    // bounded inputs of norm U add at most U / (1 - rho). If rho >= 1 the bound holds
+    // for a limited time : the rule certifies the oscillator until its radius may
+    // have doubled, and records that duration when it is shorter than the horizon (a
+    // single-precision oscillator : about 30 seconds at 48 kHz).
+    struct Rotation {
+        bool   ok = false;
+        double radius = 0;  ///< bound of |x| and |y|
+        bool   invalid = false;
+    };
+    mutable std::unordered_map<Tree, Rotation> fRotations;  ///< per recursive group
+
+    /// a coefficient : a constant times a symbolic factor (or none)
+    struct Coef {
+        double k = 1;
+        Tree   f = nullptr;
+    };
+
+    /// the terms of a branch body : the scale r, the coefficient of x' and y', the inputs
+    static bool linearBody(Tree body, Tree group, double& r, Coef coef[2], bool seen[2],
+                           std::vector<std::pair<Tree, int>>& inputs)
+    {
+        int    op;
+        Tree   a, b;
+        double k;
+        r          = 1;
+        Tree inner = body;
+        if (isSigBinOp(body, &op, a, b) && op == kMul && constNum(b, k)) {
+            r     = k;
+            inner = a;
+        } else if (isSigBinOp(body, &op, a, b) && op == kMul && constNum(a, k)) {
+            r     = k;
+            inner = b;
+        }
+        std::vector<std::pair<Tree, int>> terms;
+        sumTerms(inner, 1, terms);
+        seen[0] = seen[1] = false;
+        for (const auto& [t, sign] : terms) {
+            std::vector<Tree> fs;
+            productFactors(t, fs);
+            int    which = -1;
+            Coef   c;
+            bool   simple = true;
+            c.k           = sign;
+            for (Tree f : fs) {
+                Tree d, n, g, z, x;
+                int  i;
+                if (isSigDelay(f, d, n) && constNum(n, k) && k == 1 && isProj(d, &i, g) && g == group) {
+                    if (which >= 0) return false;  // x' * y' : not linear
+                    which = i;
+                } else if (constNum(f, k)) {
+                    c.k *= k;
+                } else if (isSigBinOp(f, &op, z, x) && op == kSub && constNum(z, k) && k == 0) {
+                    c.k = -c.k;  // 0 - s
+                    if (c.f) simple = false;
+                    c.f = x;
+                } else {
+                    if (c.f) simple = false;
+                    c.f = f;
+                }
+            }
+            if (which < 0) {
+                inputs.push_back({t, sign});
+                continue;
+            }
+            if (which > 1 || seen[which] || !simple || !c.f) return false;
+            seen[which] = true;
+            coef[which] = c;
+        }
+        return seen[0] && seen[1];
+    }
+
+    /// k * (1 - 1') : an impulse of amplitude k
+    static bool impulseAmplitude(Tree t, double& amp)
+    {
+        std::vector<Tree> fs;
+        productFactors(t, fs);
+        double k   = 1, v;
+        bool   imp = false;
+        for (Tree f : fs) {
+            int  op;
+            Tree a, b, d, n, x;
+            if (isSigFloatCast(f, x)) f = x;  // float(1 - 1') is still the impulse
+            tvec fir;
+            double c0, c1;
+            if (!imp && isSigFIR(f, fir) && fir.size() == 3 && constNum(fir[0], v) &&
+                constNum(fir[1], c0) && constNum(fir[2], c1) && c1 == -c0) {
+                k *= v * c0;  // FIR[v, c, -c] : c v (1 - 1'), the -fir form
+                imp = true;
+                continue;
+            }
+            if (constNum(f, v)) {
+                k *= v;
+            } else if (!imp && isSigBinOp(f, &op, a, b) && op == kSub && constNum(a, v) && v == 1 &&
+                       isSigDelay(b, d, n) && constNum(d, v) && v == 1 && constNum(n, v) && v == 1) {
+                imp = true;
+            } else {
+                return false;
+            }
+        }
+        amp = std::abs(k);
+        return imp;
+    }
+
+    /// the closed bound of the rotation group, or nothing (ok false)
+    Rotation rotationOf(Tree group, FixPointEvaluator<AffItv>& ev) const
+    {
+        Rotation rot;
+        Tree     var, body;
+        if (!isRec(group, var, body) || len(body) != 2) return rot;
+        double                            r[2];
+        Coef                              m[2][2];
+        bool                              seen[2];
+        std::vector<std::pair<Tree, int>> inputs[2];
+        for (int i = 0; i < 2; i++) {
+            if (!linearBody(nth(body, i), group, r[i], m[i], seen, inputs[i])) return rot;
+        }
+        // m[i][j] : coefficient of v_j' in branch i ; rotation : cos on the diagonal,
+        // sin with opposite signs off it, the same angle everywhere
+        Tree t0, t1, t2, t3;
+        if (!primArg(m[0][0].f, sigs::g.gCosPrim, t0) || !primArg(m[1][1].f, sigs::g.gCosPrim, t1) ||
+            !primArg(m[0][1].f, sigs::g.gSinPrim, t2) || !primArg(m[1][0].f, sigs::g.gSinPrim, t3)) {
+            return rot;
+        }
+        if (t0 != t1 || t0 != t2 || t0 != t3) return rot;
+        if (m[0][0].k != 1 || m[1][1].k != 1 || std::abs(m[0][1].k) != 1 || m[1][0].k != -m[0][1].k) {
+            return rot;
+        }
+        double amp2 = 0, u2 = 0;
+        bool   invalid = false;
+        for (int i = 0; i < 2; i++) {
+            double a = 0, uu = 0;
+            for (const auto& [t, sign] : inputs[i]) {
+                double k;
+                if (impulseAmplitude(t, k)) {
+                    a += k;
+                    continue;
+                }
+                const AffItv   v  = ev.eval(t);
+                const interval iv = itv::toItv(v, fT);
+                if (iv.isEmpty() || !iv.isBounded()) return rot;
+                invalid = invalid || v.mayBeInvalid;
+                uu += std::max(std::abs(iv.lo()), std::abs(iv.hi()));
+            }
+            amp2 += a * a;
+            u2 += uu * uu;
+        }
+        const AffItv ct = ev.eval(t0);
+        invalid         = invalid || ct.mayBeInvalid;
+        const double u   = itv::programPrecision() == 2 ? std::ldexp(1.0, -53) : std::ldexp(1.0, -24);
+        const double rho = std::max(std::abs(r[0]), std::abs(r[1])) * (1 + 8 * u);
+        const double A = std::sqrt(amp2) * (1 + u), U = std::sqrt(u2) * (1 + u);
+        if (rho < 1) {
+            rot.radius = A + U / (1 - rho);
+        } else {
+            if (U > 0) return rot;  // a driven undamped resonator grows even exactly
+            const double doubling = std::log(2.0) / std::log(rho);
+            const double n        = std::min(doubling, fT);
+            rot.radius            = A * std::pow(rho, n);
+            if (doubling < fT) {
+                std::string& reason = rotationReason();
+                auto         known  = sigs::g.gCertifiedSamples.find(reason);
+                if (known == sigs::g.gCertifiedSamples.end() || doubling < known->second) {
+                    sigs::g.gCertifiedSamples[reason] = doubling;
+                }
+            }
+        }
+        rot.radius  = std::nextafter(rot.radius * (1 + std::ldexp(1.0, -40)), HUGE_VAL);
+        rot.ok      = std::isfinite(rot.radius);
+        rot.invalid = invalid;
+        return rot;
+    }
+
+    /// the reason recorded with the certified duration
+    static std::string& rotationReason()
+    {
+        static std::string single = "rounding drift of a rotation oscillator, in single precision";
+        static std::string other  = "rounding drift of a rotation oscillator";
+        return itv::programPrecision() == 1 ? single : other;
+    }
+
+    /// sig is a branch body of a rotation oscillator : its closed bound
+    bool rotationBody(Tree sig, FixPointEvaluator<AffItv>& ev, AffItv& result) const
+    {
+        // find the group through a delayed projection among the terms
+        std::vector<std::pair<Tree, int>> terms;
+        int                               op;
+        Tree                              a, b;
+        double                            k;
+        Tree                              inner = sig;
+        if (isSigBinOp(sig, &op, a, b) && op == kMul && (constNum(a, k) || constNum(b, k))) {
+            inner = constNum(a, k) ? b : a;
+        }
+        if (!isSum(inner)) return false;
+        sumTerms(inner, 1, terms);
+        Tree group = nullptr;
+        for (const auto& [t, sign] : terms) {
+            std::vector<Tree> fs;
+            productFactors(t, fs);
+            for (Tree f : fs) {
+                Tree d, n, g;
+                int  i;
+                if (isSigDelay(f, d, n) && isProj(d, &i, g)) {
+                    group = g;
+                    break;
+                }
+            }
+            if (group) break;
+        }
+        Tree var, body;
+        if (!group || !isRec(group, var, body) || len(body) != 2) return false;
+        if (nth(body, 0) != sig && nth(body, 1) != sig) return false;
+        auto it = fRotations.find(group);
+        if (it == fRotations.end()) it = fRotations.emplace(group, rotationOf(group, ev)).first;
+        const Rotation& rot = it->second;
+        if (!rot.ok) return false;
+        result = itv::fromItv(interval(-rot.radius, rot.radius, -24, rot.invalid));
+        return true;
+    }
+
+    //--- the one-pole smoother and the accumulator of the -fir form -------------------
+
+    // The one-pole smoother in the -fir form, IIR[, (1 - a) * A, 0, a] : y(n) = (1 - a) A(n)
+    // + a y(n-1), y(-1) = 0, a convex mix of A and of the previous output, so y stays
+    // between 0 and the extremes of A. In the program each step adds at most 3 rounding
+    // errors of its operands while the pole contracts the excess by 1 - a : the excess
+    // stays below kappa = 3u / (1 - a - 3u) of the magnitude of A (a pole closer to 1
+    // than 3u gives no bound).
+    bool firstOrderMix(Tree sig, const std::vector<AffItv>& c, FixPointEvaluator<AffItv>& ev,
+                       AffItv& result) const
+    {
+        if (c.size() != 4) return false;
+        Tree              a = sig->branch(3);
+        std::vector<Tree> fs;
+        productFactors(sig->branch(1), fs);
+        int found = -1;
+        for (size_t i = 0; i < fs.size(); i++) {
+            Tree k;
+            if (complementOf(fs[i], k) && sameValue(k, a)) {
+                found = int(i);
+                break;
+            }
+        }
+        if (found < 0 || fs.size() < 2) return false;
+        const interval ia = itv::toItv(c[3], fT);
+        if (ia.isEmpty() || ia.lo() < 0 || ia.hi() >= 1) return false;
+        // A : the product of the other factors of the input, evaluated directly
+        interval iA;
+        bool     first = true;
+        AffItv   prod;
+        for (size_t i = 0; i < fs.size(); i++) {
+            if (int(i) == found) continue;
+            const AffItv v = ev.eval(fs[i]);
+            prod           = first ? v : this->Mul(prod, v);
+            first          = false;
+        }
+        iA = itv::toItv(prod, fT);
+        if (iA.isEmpty() || !iA.isBounded()) return false;
+        const double u     = itv::programPrecision() == 2 ? std::ldexp(1.0, -53) : std::ldexp(1.0, -24);
+        const double room  = 1 - ia.hi() - 3 * u;
+        if (!(room > 0)) return false;
+        const double mag   = std::max(std::abs(iA.lo()), std::abs(iA.hi()));
+        const double kappa = 3 * u / room * (1 + std::ldexp(1.0, -20));
+        double       lo = std::min(iA.lo(), 0.0) - kappa * mag, hi = std::max(iA.hi(), 0.0) + kappa * mag;
+        // y(n) = sum (1 - a) a^(n-k) A(k) holds at least its newest term (1 - a) A(n) : a
+        // nonnegative A keeps y above (1 - a) min A from the first sample on (and
+        // symmetrically), less the rounding of that term
+        const double shrink = 1 - 4 * u;
+        if (iA.lo() >= 0) lo = (1 - ia.hi()) * iA.lo() * shrink;
+        if (iA.hi() <= 0) hi = (1 - ia.hi()) * iA.hi() * shrink;
+        result = itv::fromItv(interval(lo, hi, std::min(iA.lsb(), ia.lsb()),
+                                       prod.mayBeInvalid || c[1].mayBeInvalid || c[3].mayBeInvalid));
+        return true;
+    }
+
+    // The integer accumulator in the -fir form, IIR[, x, 0, 1] : y(n) = x(n) + y(n-1), the
+    // time counter among them. An exact integer sum of a constant x in [xl, xh] lies in
+    // [xl (t+1), xh (t+1)] at time t : the affine corridor the recursive form gets, read
+    // over the horizon and capped at the int32 range past its wrap date (toItv).
+    bool integerAccumulator(Tree sig, const std::vector<AffItv>& c, AffItv& result) const
+    {
+        int k;
+        if (c.size() != 4 || !isSigInt(sig->branch(3), &k) || k != 1) return false;
+        const AffItv& x = c[1];
+        if (x.isEmpty() || !x.isConst() || x.lsb < 0 || !std::isfinite(x.a0) || !std::isfinite(x.b0)) {
+            return false;
+        }
+        result      = x;
+        result.a1   = x.a0;
+        result.b1   = x.b0;
+        result.lsb  = 0;
+        return true;
+    }
+
+    //--- the rules, in order ----------------------------------------------------------
+
+    AffItv combine(Tree sig, const std::vector<AffItv>& c,
+                   FixPointEvaluator<AffItv>& ev) const override
+    {
+        // The rules that see more than one node at a time (the dependency problem),
+        // each one sound on its own ; a node they do not recognize gets the
+        // library's rule.
+        AffItv r;
+        if (guardedSelect(sig, c, ev, r)) return r;
+        if (rotationBody(sig, ev, r)) return r;
+        if (isSigIIR(sig) && firstOrderMix(sig, c, ev, r)) return r;
+        if (isSigIIR(sig) && integerAccumulator(sig, c, r)) return r;
+        if (isSum(sig) && hasRoundingTerm(sig) && fractionalSum(sig, ev, r)) return r;
+        if (isSum(sig) && hasComplementTerm(sig) && mixSum(sig, ev, r)) return r;
+        // A table read : the library cannot certify it (the table extent is not part
+        // of the value), the compiler can. Promotion clamps every index it does not
+        // prove within [0, size-1] by exact integer reasoning (sigPromotion), so the
+        // read returns an element of the table : the read is valid when the table and
+        // the index are (an index that may be NaN or overflow is not).
+        Tree tbl, ri, size, gen, wi, ws;
+        if (isSigRDTbl(sig, tbl, ri) && isSigWRTbl(tbl, size, gen, wi, ws)) {
+            // A read at a constant index of a table filled by a literal waveform is that
+            // element : the waveform is the generator, its value at time k is element k
+            // (cyclically), and a read-only table keeps it. The join of all the elements
+            // made the difference of two neighbours of an interpolation contain zero.
+            Tree           w;
+            const interval ix = itv::toItv(c[1], fT);
+            if (wi == ::nil() && isSigGen(gen, w) && isSigWaveform(w) && w->arity() > 0 &&
+                !ix.isEmpty() && ix.lo() == ix.hi() && ix.lo() >= 0 && ix.lsb() >= 0 &&
+                !c[1].mayBeInvalid) {
+                const int k = int(ix.lo()) % w->arity();
+                return ev.eval(w->branch(k)).withInvalid(c[0].mayBeInvalid);
+            }
+            AffItv r       = itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, c, ev);
+            r.mayBeInvalid = c[0].mayBeInvalid || c[1].mayBeInvalid;
+            return r;
+        }
+        return itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, c, ev);
+    }
+
     AffItv Iir(Tree sig, const std::vector<AffItv>& c) const override
     {
         // coefficient boxes (C1..Cn), corners for the variable ones
@@ -163,11 +1183,22 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     int maxNarrowingIterations() const override { return 3; }
     int maxIterations() const override { return 1000; }
 
-    //--- probe: positivity seed first, then the symmetric fallback ---------------------
+    //--- probe: a ladder of magnitudes, positivity seed first at each rung ------------
+    // The first certified seed is the threshold : a ladder (1, 16, 256 ... 2^28, then
+    // 2^30) finds a bound within a factor 16 for a slowly contracting recursion (a
+    // smoother whose pole is a few ulps below 1), that a single 2^30 seed would leave
+    // at 2^30 : the narrowing steps cannot descend from it.
     std::vector<AffItv> probeSeeds(Tree) const override
     {
-        return {itv::fromItv(interval(0, kBig, 0)),
-                itv::fromItv(interval(-kBig, kBig, 0))};
+        std::vector<AffItv> seeds;
+        for (int e = 0; e <= 28; e += 4) {
+            const double m = std::ldexp(1.0, e);
+            seeds.push_back(itv::fromItv(interval(0, m, 0)));
+            seeds.push_back(itv::fromItv(interval(-m, m, 0)));
+        }
+        seeds.push_back(itv::fromItv(interval(0, kBig, 0)));
+        seeds.push_back(itv::fromItv(interval(-kBig, kBig, 0)));
+        return seeds;
     }
     void recordProbe(Tree var, const AffItv& probed, bool certified) const override
     {
@@ -182,6 +1213,68 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         const bool wlo = fresh.lo(0) < old.lo(0) || fresh.lo(fT) < old.lo(fT);
         const bool whi = fresh.hi(0) > old.hi(0) || fresh.hi(fT) > old.hi(fT);
         if (!wlo && !whi) return fresh;
+
+        // A contracting recursion (a smoother, a leaky integrator) approaches its
+        // bound geometrically and never settles in a handful of rounds. Before the
+        // probe threshold or the escalation, guess the limit of each moving bound : the
+        // fixed point of the secant through the last two (iterate, image) pairs, plus a
+        // margin, when the secant contracts (slope below 1) ; a relative jump, when the
+        // bound only creeps by a few rounding errors. A bound that grows for real (an
+        // accumulator) is left to the rate proposal below, which dates it.
+        // The guess is only a guess : the iteration goes on from it, and stops there
+        // only if it is a post-fixpoint (F(guess) within the guess), which is what makes
+        // the result sound. A guess that fails gives way to the rules below.
+        if (fresh.isConst() && old.isConst() && std::isfinite(fresh.a0) && std::isfinite(fresh.b0)) {
+            Extrapolation& h = fExtrapolation[var];
+            if (h.rounds < kExtrapolationRounds) {
+                const bool   first = h.rounds == 0 || h.old.isEmpty() || !h.old.isConst() || !h.fresh.isConst();
+                const AffItv po = h.old, pf = h.fresh;
+                h.old           = old;
+                h.fresh         = fresh;
+                ++h.rounds;
+                if (first) return fresh;
+                const double mag = std::max({std::abs(fresh.a0), std::abs(fresh.b0), std::ldexp(1.0, -60)});
+                // x0 -> f0 and x1 -> f1 : the bound's image, dir = +1 for hi, -1 for lo ;
+                // NAN when the secant does not contract
+                bool contracting = true;
+                const double ladder = mag * std::ldexp(1.0, 6 * h.rounds - 18);  // 2^-6, 1, 2^6
+                auto guess = [mag, ladder, &contracting](double x0, double f0, double x1, double f1, double dir) {
+                    const double move = (f1 - x1) * dir;
+                    if (!(move > 0)) return f1;
+                    if (x1 != x0) {
+                        const double slope = (f1 - f0) / (x1 - x0);
+                        if (slope >= 0 && slope < 1) {
+                            const double l    = x1 + (f1 - x1) / (1 - slope);
+                            const double jump = std::max((l - f1) * dir, 0.0) + std::abs(l) * std::ldexp(1.0, -20) +
+                                                mag * std::ldexp(1.0, -40) + move;
+                            return std::nextafter(f1 + dir * jump, dir * HUGE_VAL);
+                        }
+                    }
+                    // a creep of a few rounding errors per round (a smoother whose pole
+                    // is a few ulps below 1) gets a relative jump, larger at each round ;
+                    // a real growth (an accumulator) is left to the rate proposal
+                    if (move <= mag * std::ldexp(1.0, -16)) {
+                        return std::nextafter(f1 + dir * (ladder + 16 * move), dir * HUGE_VAL);
+                    }
+                    contracting = false;
+                    return f1;
+                };
+                AffItv r = fresh;
+                if (whi) r.b0 = std::max(fresh.b0, guess(po.b0, pf.b0, old.b0, fresh.b0, 1));
+                if (wlo) r.a0 = std::min(fresh.a0, guess(po.a0, pf.a0, old.a0, fresh.a0, -1));
+                // never beyond a certified probe threshold that already holds the image
+                auto pt = fProbe.find(var);
+                if (pt != fProbe.end() && pt->second.second && pt->second.first.isConst()) {
+                    const AffItv&  p = pt->second.first;
+                    const interval f = itv::toItv(fresh, fT);
+                    if (!p.isEmpty() && p.a0 <= f.lo() && f.hi() <= p.b0) {
+                        r.a0 = std::max(r.a0, p.a0);
+                        r.b0 = std::min(r.b0, p.b0);
+                    }
+                }
+                if (contracting && std::isfinite(r.a0) && std::isfinite(r.b0)) return r;
+            }
+        }
 
         auto it = fProbe.find(var);
         if (it != fProbe.end() && it->second.second && fresh.isConst() && old.isConst()) {

@@ -30,6 +30,16 @@ file(GLOB SIGNALS_SRC   CONFIGURE_DEPENDS signals/*.cpp)
 file(GLOB TLIB_SRC      CONFIGURE_DEPENDS tlib/*.cpp)
 file(GLOB INTERVAL_SRC  CONFIGURE_DEPENDS interval/*.cpp)
 
+# The interval library proves its bounds under IEEE binary arithmetic : its sources
+# must be compiled without contraction nor reassociation, and with wrapping signed
+# integers (the README of the interval library). Applied to its sources only, as in
+# faust (build/misc/interval_flags.cmake).
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(${INTERVAL_SRC} PROPERTIES COMPILE_FLAGS "-fno-fast-math -ffp-contract=off -fwrapv")
+elseif (MSVC)
+    set_source_files_properties(${INTERVAL_SRC} PROPERTIES COMPILE_FLAGS "/fp:strict")
+endif ()
+
 # the library
 add_library(signals STATIC
     ${SIGNALS_SRC}

@@ -114,6 +114,10 @@ struct State {
     std::map<Tree, std::pair<int, std::string>, treeorder> gSignalTable{};
     int                                         gSignalCounter{};
     std::vector<std::string>                    gSignalTrace{};
+    // Validity certificates of the interval analysis : a rule that bounds a signal only
+    // for a limited number of samples records it here, keyed by its reason (the
+    // smallest count wins). The compiler reports them, by default.
+    std::map<std::string, double>               gCertifiedSamples{};
     int                                         gAllocationCount{};  // Internal signal types counter
     bool                                        gCausality{};  // FIXME: global used as a parameter of typeAnnotation when true trigs
     Tree                                        RECURSIVNESS{};
