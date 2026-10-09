@@ -37,6 +37,67 @@
 namespace itv {
 
 /**
+ * The precision of the program the intervals describe : 1 single (float), 2 double (the
+ * default), 3 quad, 4 fixed point. A user declares the precision of its program ; the
+ * Faust compiler sets it from its float size (-single, -double...).
+ */
+inline int& programPrecision()
+{
+    static int precision = 2;
+    return precision;
+}
+
+/**
+ * The compensation of the libm (true by default) : the functions of the libm (sin, exp,
+ * log, pow...) are not guaranteed correctly rounded, and the program calls the libm of
+ * its target, not the one that computes the intervals. Their bounds widen by 2 ulps of
+ * the program's precision (libmBounds). A user may turn it off when both libms are
+ * correctly rounded (CORE-MATH for instance) : the libm of the target, and the libm of
+ * the machine that computes the intervals.
+ */
+inline bool& libmCompensation()
+{
+    static bool compensation = true;
+    return compensation;
+}
+
+/**
+ * A bound of a float-carried value, at the precision of the program. Round to nearest
+ * is monotone : for a monotone operation, the bound computed in double then rounded
+ * to float is the value the program computes at that bound. For +, -, *, / and sqrt
+ * of floats, the double rounding is innocuous (53 >= 2*24 + 2) : rounding in double
+ * then in float gives the float the program computes, even when the double result is
+ * not exact. Not covered : the C++ compiler's FMA contraction and reassociation, the
+ * libm (not correctly rounded) ; the decisions keep their own margin for those (the
+ * guard of a table access near its edges). Round to nearest, not outward : a constant
+ * stays a point. Left as they are : an integer bound beyond 2^24 (an integer value may
+ * carry a float precision by default) and a nonzero bound below the smallest normal
+ * float (its rounding to 0 would break the invariants of pow and log).
+ */
+inline double programBound(double b)
+{
+    if (programPrecision() != 1 || std::isnan(b) || std::isinf(b)) return b;
+    if (std::fabs(b) >= 16777216.0 && b == std::floor(b)) return b;
+    // below the smallest normal float, the rounding would reach 0 and break the
+    // invariants of the operations (a positive bound stays positive : pow, log)
+    if (b != 0 && std::fabs(b) < 0x1p-126) return b;
+    return double(float(b));
+}
+
+/**
+ * k ulps of the program's precision at the magnitude of [lo, hi] : the margin of a rule
+ * that reasons on reals (the hull of a convex combination), whose float evaluation can
+ * leave the hull by a few roundings. The elementary operations need none : their
+ * bounds are computed at the precision of the program (programBound).
+ */
+inline double ulpMargin(double lo, double hi, int k)
+{
+    int    p   = programPrecision();
+    double eps = (p == 1 || p == 4) ? 0x1p-23 : ((p == 3) ? 0x1p-112 : 0x1p-52);
+    return k * eps * std::max(std::fabs(lo), std::fabs(hi));
+}
+
+/**
  * Cast a double to an int, with saturation.
  */
 inline int saturatedIntCast(double d)
@@ -79,6 +140,11 @@ class interval {
         } else {
             fLo = std::min(n, m);
             fHi = std::max(n, m);
+            // a float-carried value : its bounds at the precision of the program
+            if (fLSB < 0) {
+                fLo = programBound(fLo);
+                fHi = programBound(fHi);
+            }
         }
     }
 
@@ -89,6 +155,8 @@ class interval {
             fHi  = 0;
             fLSB = 0;
         } else {
+            // a fractional constant is a float of the program
+            if (x != std::floor(x)) x = programBound(x);
             // compute the preficion needed to represent x
             // in the form x = 2^p * y, where y is an integer
             int    p = 0;
@@ -296,4 +364,36 @@ inline bool operator>(const interval& i, const interval& j)
 {
     return j < i;
 }
+
+/**
+ * The bounds of a libm function, compensated : 2 ulps of the program's precision
+ * outward, within the image [fmin, fmax] of the function (sin stays in [-1, 1], exp
+ * stays >= 0), a bound of exactly 0 excepted. A point is left as it is : a function of
+ * a constant is folded by the compiler and never calls the libm of the target.
+ */
+inline double ulpStep(double b, double dir)
+{
+    if (std::isnan(b) || std::isinf(b)) return b;
+    int p = programPrecision();
+    if (p == 1 || p == 4) return double(std::nextafter(float(b), float(dir)));
+    return std::nextafter(b, dir);
+}
+
+inline interval libmBounds(const interval& r, double fmin, double fmax)
+{
+    // an integer result (lsb >= 0) is computed in integers, never by the libm
+    if (!libmCompensation() || r.isEmpty() || r.isconst() || r.lsb() >= 0) return r;
+    // a bound of exactly 0 stays : the C standard (annex F) makes the libm exact there
+    // (sin(+-0) = +-0, tan(0) = 0, log(1) = 0, pow(0, y) = 0...), and a bound of 0 comes
+    // from such an exact point
+    double lo = r.lo(), hi = r.hi();
+    for (int k = 0; k < 2; k++) {
+        if (lo != 0) lo = ulpStep(lo, -HUGE_VAL);
+        if (hi != 0) hi = ulpStep(hi, HUGE_VAL);
+    }
+    if (r.lo() >= fmin) lo = std::max(lo, fmin);
+    if (r.hi() <= fmax) hi = std::min(hi, fmax);
+    return interval(lo, hi, r.lsb());
+}
+
 }  // namespace itv
