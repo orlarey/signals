@@ -190,6 +190,20 @@ class SIGS_API TreeAlgebra : public SignalDispatch<Tree> {
         return tree(sigs::g.SIGMIX, c, a, b);
     }
     Tree Tpt(const Tree& x) const override { return tree(sigs::g.SIGTPT, x); }
+    // the kernels stay nodes : FIR[x, c0, ...], IIR[nil, x, 0, C1, ...], Sum[t0, ...]
+    Tree Sum(const std::vector<Tree>& t) const override { return tree(sigs::g.SIGSUM, t); }
+    Tree Fir(const Tree& x, const std::vector<Tree>& c) const override
+    {
+        tvec b{x};
+        b.insert(b.end(), c.begin(), c.end());
+        return tree(sigs::g.SIGFIR, b);
+    }
+    Tree Iir(const Tree& x, const std::vector<Tree>& c) const override
+    {
+        tvec b{nil(), x, IntNum(0)};
+        b.insert(b.end(), c.begin(), c.end());
+        return tree(sigs::g.SIGIIR, b);
+    }
     Tree AssertBounds(const Tree& lo, const Tree& hi, const Tree& x) const override
     {
         return tree(sigs::g.SIGASSERTBOUNDS, lo, hi, x);

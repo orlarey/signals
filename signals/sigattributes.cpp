@@ -167,6 +167,10 @@ class NatureAlgebra : public SignalAlgebra<int> {
     int Cfrac(const int& x) const override { return x | kReal; }
     int Mix(const int& c, const int& a, const int& b) const override { return kReal | c | a | b; }
     int Tpt(const int&) const override { return kReal; }
+    // the kernels : their definitions (exact for this attribute, see SignalDispatch)
+    int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
+    int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int&) const override { return kReal; }
     int Log10(const int&) const override { return kReal; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -327,6 +331,10 @@ class VariabilityAlgebra : public SignalAlgebra<int> {
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kKonst | c | a | b; }
     int Tpt(const int& x) const override { return x | kKonst; }
+    // the kernels : their definitions (exact for this attribute, see SignalDispatch)
+    int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
+    int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -481,6 +489,10 @@ class ComputabilityAlgebra : public SignalAlgebra<int> {
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kComp | c | a | b; }
     int Tpt(const int& x) const override { return x | kComp; }
+    // the kernels : their definitions (exact for this attribute, see SignalDispatch)
+    int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
+    int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -639,6 +651,10 @@ class VectorabilityAlgebra : public SignalAlgebra<int> {
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kVect | c | a | b; }
     int Tpt(const int& x) const override { return x | kVect; }
+    // the kernels : their definitions (exact for this attribute, see SignalDispatch)
+    int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
+    int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -790,6 +806,10 @@ class BooleanAlgebra : public SignalAlgebra<int> {
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kNum | c | a | b; }
     int Tpt(const int& x) const override { return x | kNum; }
+    // the kernels : their definitions (exact for this attribute, see SignalDispatch)
+    int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
+    int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }

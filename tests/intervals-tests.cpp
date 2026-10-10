@@ -803,6 +803,45 @@ static void nodes()
     }
 }
 
+static void kernels()
+{
+    section("the kernels sum, fir, iir");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        TreeAlgebra       B;
+        Tree              xs = slider("kx" + p, 0, -1, 1);
+        Tree              xp = slider("kp" + p, 0.5, 0, 1);
+        // the pink noise filter : stable, constant coefficients, a gain near 8300
+        Tree pink = B.Iir(xs, {sigReal(2.494956002), sigReal(-2.017265875), sigReal(0.522189400)});
+        // a smoother of a nonnegative input, and an integrator (no gain)
+        Tree smooth = B.Iir(xp, {sigReal(0.99)});
+        Tree integ  = B.Iir(xs, {sigReal(1.0)});
+        Tree fir    = B.Fir(xp, {sigReal(1.0), sigReal(0.0), sigReal(-2.0)});
+        Tree sum    = B.Sum({xp, sigReal(2.0), xs});
+        Tree o      = outs({pink, smooth, fir, sum});
+        itv::programPrecision() = precision;
+        typeAnnotation(outs({pink, smooth, integ, fir, sum}), false);
+        check(itvOf(pink).isValid() && itvOf(pink).lo() > -8500 && itvOf(pink).hi() < 8500,
+              "precision : the pink noise filter of [-1, 1] is within its certified gain" + p);
+        check(itvOf(smooth).isValid() && itvOf(smooth).lo() > -1e-6 && itvOf(smooth).hi() < 100.01,
+              "precision : a smoother of [0, 1] by 0.99 is [0, 100]" + p);
+        check(!itvOf(integ).isValid() && !itvOf(integ).isBounded(), "validity : a float integrator may be anything" + p);
+        check(itvOf(fir).lo() <= -2 && itvOf(fir).lo() > -2.001 && itvOf(fir).hi() >= 1 && itvOf(fir).hi() < 1.001,
+              "precision : fir of [0, 1] by (1, 0, -2) is [-2, 1]" + p);
+        check(itvOf(sum).lo() <= 1 && itvOf(sum).lo() > 0.999 && itvOf(sum).hi() >= 4 && itvOf(sum).hi() < 4.001,
+              "precision : sum of [0,1], 2, [-1,1] is [1, 4]" + p);
+        inclusion("kernels", o, precision);
+        // the nodes are the operations : a transformation keeps them, the tree algebra
+        // builds them with the layout of the reveal (IIR[nil, x, 0, C1, ...])
+        TransformAlgebra identity;
+        check(signalTransform(o, identity) == o, "a transformation keeps sum, fir and iir" + p);
+        check(fir == sigFIR({xp, sigReal(1.0), sigReal(0.0), sigReal(-2.0)}) &&
+                  smooth == sigIIR({nil(), xp, sigInt(0), sigReal(0.99)}) &&
+                  sum == sigSum({xp, sigReal(2.0), xs}),
+              "the kernel nodes are the operations of FaustAlgebra" + p);
+    }
+}
+
 static void invalidities()
 {
     section("what must stay invalid");
@@ -850,6 +889,7 @@ int main()
     rotations();
     firForms();
     nodes();
+    kernels();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
