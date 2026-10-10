@@ -354,9 +354,9 @@ ostream& ppsig::print(ostream& fout) const
         printfun(fout, "register", sigInt(i), x);
     }
 
-    else if (isSigFIR(fSig) || isSigIIR(fSig) || isSigSum(fSig)) {
-        // n-ary kernels revealed by -fir : generic bracketed print
-        fout << (isSigFIR(fSig) ? "FIR[" : (isSigIIR(fSig) ? "IIR[" : "Sum["));
+    else if (isSigFIR(fSig) || isSigIIR(fSig) || isSigSum(fSig) || isSigProd(fSig)) {
+        // n-ary kernels : generic bracketed print
+        fout << (isSigFIR(fSig) ? "FIR[" : (isSigIIR(fSig) ? "IIR[" : (isSigSum(fSig) ? "Sum[" : "Prod[")));
         std::string sep = "";
         for (Tree b : fSig->branches()) {
             fout << sep << ppsig(b, fEnv, fPriority);

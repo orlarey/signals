@@ -395,6 +395,9 @@ SIGS_API bool isSigIIR(Tree s, tvec& sigcoefs);
 SIGS_API Tree sigSum(const tvec& sigsubs);
 SIGS_API bool isSigSum(Tree s);
 SIGS_API bool isSigSum(Tree s, tvec& sigsubs);
+SIGS_API Tree sigProd(const tvec& sigsubs);
+SIGS_API bool isSigProd(Tree s);
+SIGS_API bool isSigProd(Tree s, tvec& sigsubs);
 
 /*****************************************************************************
                              Compound operations

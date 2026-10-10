@@ -270,6 +270,7 @@ class SIGS_API TransformAlgebra : public SignalDispatch<XSig> {
     }
     XSig Tpt(const XSig& x) const override { return o(fBuild.Tpt(x.out)); }
     XSig Sum(const std::vector<XSig>& t) const override { return o(fBuild.Sum(outs(t))); }
+    XSig Prod(const std::vector<XSig>& t) const override { return o(fBuild.Prod(outs(t))); }
     XSig Fir(const XSig& x, const std::vector<XSig>& c) const override
     {
         return o(fBuild.Fir(x.out, outs(c)));

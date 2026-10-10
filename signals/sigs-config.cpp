@@ -117,6 +117,7 @@ void initSignalSymbols()
     g.SIGMIX             = signal_signature.add("SigMix");
     g.SIGTPT             = signal_signature.add("SigTpt");
     g.SIGNEG             = signal_signature.add("SigNeg");
+    g.SIGPROD            = signal_signature.add("SigProd");
 
     // The session's initial algebra: its dispatch signature was just interned,
     // and dies with the tlib session -- rebuild it here, on both init paths

@@ -335,6 +335,16 @@ class Evaluator {
             for (Tree u : subs) s = s + r(at(u, n));
             return s;
         }
+        if (isSigProd(t, subs)) {  // ((f0 * f1) * ...) * fn
+            if (isInt(t)) {
+                int64_t p = int64_t(at(subs[0], n));
+                for (size_t k = 1; k < subs.size(); k++) p = int64_t(wrap(p * int64_t(at(subs[k], n))));
+                return double(p);
+            }
+            T p = r(at(subs[0], n));
+            for (size_t k = 1; k < subs.size(); k++) p = p * r(at(subs[k], n));
+            return p;
+        }
         if (isSigFIR(t, subs)) {  // FIR[x, c0, c1, ...] = sum c_k x(n-k)
             T s = 0;
             for (size_t k = 1; k < subs.size(); k++) {
@@ -875,6 +885,39 @@ static void negations()
     }
 }
 
+static void products()
+{
+    section("the product Prod");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        TreeAlgebra       B;
+        Tree              a  = slider("pa" + p, 0.2, 0.1, 0.3);
+        Tree              b  = slider("pb" + p, -3, -3.7, -2.1);
+        Tree              c  = slider("pc" + p, 0.5, 1.0 / 3, 0.7);
+        Tree              ia = sigIntCast(slider("pi" + p, 3, 0, 9));
+        Tree              pr = sigProd({a, b, c});
+        Tree              pi = sigProd({ia, ia, b});
+        Tree              ch = B.Mul(B.Mul(a, b), c), chi = B.Mul(B.Mul(ia, ia), b);
+        itv::programPrecision() = precision;
+        typeAnnotation(outs({pr, pi, ch, chi}), false);
+        check(itvOf(pr).lo() == itvOf(ch).lo() && itvOf(pr).hi() == itvOf(ch).hi(),
+              "precision : prod(a, b, c) is (a * b) * c, bit for bit" + p);
+        bool same = true;
+        for (auto q : {std::make_pair(pr, ch), std::make_pair(pi, chi)}) {
+            Type t1 = getCertifiedSigType(q.first), t2 = getCertifiedSigType(q.second);
+            same    = same && t1->nature() == t2->nature() && t1->variability() == t2->variability() &&
+                   t1->computability() == t2->computability() &&
+                   t1->vectorability() == t2->vectorability() && t1->boolean() == t2->boolean();
+        }
+        check(same, "the exact attributes of prod are those of the chain of products" + p);
+        TransformAlgebra identity;
+        check(signalTransform(outs({pr, pi}), identity) == outs({pr, pi}), "a transformation keeps prod" + p);
+        check(pr->arity() == 3 && pr->branch(0) == a && pr->branch(2) == c && B.Prod({a, b, c}) == pr,
+              "the children of prod are the arguments of Prod" + p);
+        inclusion("product", outs({pr, pi}), precision);
+    }
+}
+
 static void invalidities()
 {
     section("what must stay invalid");
@@ -924,6 +967,7 @@ int main()
     nodes();
     kernels();
     negations();
+    products();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;

@@ -83,12 +83,19 @@ class SignalDispatch : public FaustAlgebra<V> {
 
     /// The definitions of the kernels, for the algebras whose value of a kernel IS its
     /// definition (the exact attributes) : not defaults -- an algebra calls them by
-    /// choice, in its own Sum, Fir and Iir.
+    /// choice, in its own Sum, Prod, Fir and Iir.
     V sumDefinition(const std::vector<V>& t) const
     {
         if (t.empty()) return this->IntNum(0);
         V acc = t[0];
         for (size_t k = 1; k < t.size(); k++) acc = this->Add(acc, t[k]);
+        return acc;
+    }
+    V prodDefinition(const std::vector<V>& t) const
+    {
+        if (t.empty()) return this->IntNum(1);
+        V acc = t[0];
+        for (size_t k = 1; k < t.size(); k++) acc = this->Mul(acc, t[k]);
         return acc;
     }
     V firDefinition(const V& x, const std::vector<V>& c) const
@@ -387,6 +394,7 @@ V SignalDispatch<V>::combine(Tree sig, const std::vector<V>& c,
             case sigs::SignalOpcode::Mix: return this->Mix(c[0], c[1], c[2]);
             case sigs::SignalOpcode::Tpt: return this->Tpt(c[0]);
             case sigs::SignalOpcode::Neg: return this->Neg(c[0]);
+            case sigs::SignalOpcode::Prod: return this->Prod(c);
 
             case sigs::SignalOpcode::Count: break;  // not a constructor
         }

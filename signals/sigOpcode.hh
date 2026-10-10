@@ -83,6 +83,7 @@ enum class SignalOpcode : std::uint8_t {
     Mix,
     Tpt,
     Neg,
+    Prod,
     Count
 };
 

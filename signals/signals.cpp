@@ -1155,6 +1155,28 @@ SIGS_API bool isSigSum(Tree s, tvec& sigsubs)
     }
 }
 
+// PROD : ((f0 * f1) * ...) * fn
+
+SIGS_API Tree sigProd(const tvec& sigsubs)
+{
+    return tree(sigs::g.SIGPROD, sigsubs);
+}
+
+SIGS_API bool isSigProd(Tree s)
+{
+    return isTree(s, sigs::g.SIGPROD);
+}
+
+SIGS_API bool isSigProd(Tree s, tvec& sigsubs)
+{
+    if (isTree(s, sigs::g.SIGPROD)) {
+        sigsubs = s->branches();
+        return true;
+    } else {
+        return false;
+    }
+}
+
 // The compound operations : frac(x) = x - floor(x), cfrac(x) = x - rint(x),
 // mix(c, a, b) = (1 - c) * a + c * b, tpt(x) = x / (x + 1). Each one is an operation of
 // FaustAlgebra, written once so that an analysis sees its repeated operand once ; the

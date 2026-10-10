@@ -169,6 +169,7 @@ class NatureAlgebra : public SignalAlgebra<int> {
     int Tpt(const int&) const override { return kReal; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Prod(const std::vector<int>& t) const override { return prodDefinition(t); }
     int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
     int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int&) const override { return kReal; }
@@ -333,6 +334,7 @@ class VariabilityAlgebra : public SignalAlgebra<int> {
     int Tpt(const int& x) const override { return x | kKonst; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Prod(const std::vector<int>& t) const override { return prodDefinition(t); }
     int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
     int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
@@ -491,6 +493,7 @@ class ComputabilityAlgebra : public SignalAlgebra<int> {
     int Tpt(const int& x) const override { return x | kComp; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Prod(const std::vector<int>& t) const override { return prodDefinition(t); }
     int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
     int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
@@ -653,6 +656,7 @@ class VectorabilityAlgebra : public SignalAlgebra<int> {
     int Tpt(const int& x) const override { return x | kVect; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Prod(const std::vector<int>& t) const override { return prodDefinition(t); }
     int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
     int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }
@@ -808,6 +812,7 @@ class BooleanAlgebra : public SignalAlgebra<int> {
     int Tpt(const int& x) const override { return x | kNum; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
+    int Prod(const std::vector<int>& t) const override { return prodDefinition(t); }
     int Fir(const int& x, const std::vector<int>& c) const override { return firDefinition(x, c); }
     int Iir(const int& x, const std::vector<int>& c) const override { return iirFeedforward(x, c); }
     int Log(const int& x) const override { return x; }

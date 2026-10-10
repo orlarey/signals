@@ -119,14 +119,35 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         return true;
     }
 
+    /// t is a product of two factors : a binary *, or the two-factor Prod of the normal form
+    static bool twoFactors(Tree t, Tree& a, Tree& b)
+    {
+        int  op;
+        tvec fs;
+        if (isSigBinOp(t, &op, a, b) && op == kMul) return true;
+        if (isSigProd(t, fs) && fs.size() == 2) {
+            a = fs[0];
+            b = fs[1];
+            return true;
+        }
+        return false;
+    }
+
+    /// t is a product : a binary *, or the Prod of the normal form
+    static bool isProduct(Tree t)
+    {
+        int  op;
+        Tree a, b;
+        return (isSigBinOp(t, &op, a, b) && op == kMul) || isSigProd(t);
+    }
+
     /// t is *(-1, x) : a negation, in the -fir form
     static bool negationOf(Tree t, Tree& x)
     {
-        int    op;
         Tree   a, b;
         double k;
         if (isSigNeg(t, x)) return true;
-        if (!isSigBinOp(t, &op, a, b) || op != kMul) return false;
+        if (!twoFactors(t, a, b)) return false;
         if (constNum(a, k) && k == -1) {
             x = b;
             return true;
@@ -206,14 +227,19 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         out.push_back({t, sign});
     }
 
-    /// the factors of a product, flattened
+    /// the factors of a product (binary * and Prod), flattened
     static void productFactors(Tree t, std::vector<Tree>& out)
     {
         int  op;
         Tree x, y;
+        tvec fs;
         if (isSigBinOp(t, &op, x, y) && op == kMul) {
             productFactors(x, out);
             productFactors(y, out);
+            return;
+        }
+        if (isSigProd(t, fs)) {
+            for (Tree f : fs) productFactors(f, out);
             return;
         }
         out.push_back(t);
@@ -237,7 +263,14 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     {
         int  op;
         Tree a, b;
+        tvec fs;
         if (isSigBinOp(t, &op, a, b) && op == kMul) return hasComplementFactor(a) || hasComplementFactor(b);
+        if (isSigProd(t, fs)) {
+            for (Tree f : fs) {
+                if (hasComplementFactor(f)) return true;
+            }
+            return false;
+        }
         return complementOf(t, a);
     }
 
@@ -369,10 +402,8 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             // for X >= 0 and X <= -1 ; between, the result rounds within [0, 1]). The
             // only error left is a multiply-add contraction of the product that computes
             // X, taken exactly on one side and rounded inside floor : half an ulp of X.
-            int  bop;
-            Tree ba, bb;
             if (terms.size() == 2 && xs.size() == 1) {
-                const bool product = isSigBinOp(x, &bop, ba, bb) && bop == kMul;
+                const bool product = isProduct(x);
                 const double xmag  = std::max(std::abs(ix.lo()), std::abs(ix.hi()));
                 eps = product ? u * xmag * (1 + std::ldexp(1.0, -20)) + std::ldexp(1.0, -125) : 0;
             }
@@ -645,6 +676,12 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             if (op == kSub && constNum(x, k)) narrowTo(y, shifted(k - n.hi(), k - n.lo()), ov, ev, depth + 1);
             return;
         }
+        if (isSigProd(t) && twoFactors(t, x, y)) {
+            // k * x as the normal form writes it : the same steps as the binary writing
+            if (constNum(y, k) && k != 0) narrowTo(x, inverseScale(n, k), ov, ev, depth + 1);
+            if (constNum(x, k) && k != 0) narrowTo(y, inverseScale(n, k), ov, ev, depth + 1);
+            return;
+        }
         if (int sign; isSigSum(t) && shiftOf(t, x, k, sign)) {
             // x + k, or k - x : the same steps as the binary writing
             const double m = std::ldexp(1.0, -20);
@@ -690,6 +727,11 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             if ((op == kMul || op == kAdd) && constNum(x, k)) chainOf(y, keys, depth + 1);
             if ((op == kDiv || op == kSub) && constNum(y, k)) chainOf(x, keys, depth + 1);
             if (op == kSub && constNum(x, k)) chainOf(y, keys, depth + 1);
+            return;
+        }
+        if (isSigProd(t) && twoFactors(t, x, y)) {
+            if (constNum(y, k)) chainOf(x, keys, depth + 1);
+            if (constNum(x, k)) chainOf(y, keys, depth + 1);
             return;
         }
         if (int sign; isSigSum(t) && shiftOf(t, x, k, sign)) {
@@ -846,10 +888,10 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         double k;
         r          = 1;
         Tree inner = body;
-        if (isSigBinOp(body, &op, a, b) && op == kMul && constNum(b, k)) {
+        if (twoFactors(body, a, b) && constNum(b, k)) {
             r     = k;
             inner = a;
-        } else if (isSigBinOp(body, &op, a, b) && op == kMul && constNum(a, k)) {
+        } else if (twoFactors(body, a, b) && constNum(a, k)) {
             r     = k;
             inner = b;
         }
@@ -1017,11 +1059,10 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     {
         // find the group through a delayed projection among the terms
         std::vector<std::pair<Tree, int>> terms;
-        int                               op;
         Tree                              a, b;
         double                            k;
         Tree                              inner = sig;
-        if (isSigBinOp(sig, &op, a, b) && op == kMul && (constNum(a, k) || constNum(b, k))) {
+        if (twoFactors(sig, a, b) && (constNum(a, k) || constNum(b, k))) {
             inner = constNum(a, k) ? b : a;
         }
         if (!isSum(inner)) return false;
@@ -1143,9 +1184,14 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     /// x may be a product a compiler contracts with the subtraction that follows
     bool contractible(Tree x, FixPointEvaluator<AffItv>& ev) const
     {
-        int  op;
         Tree a, b;
-        if (!isSigBinOp(x, &op, a, b) || op != kMul) return false;
+        tvec fs;
+        if (isSigProd(x, fs) && fs.size() > 2) {
+            // the last product, (f0 * ... * fn-1) * fn, is the one a compiler contracts
+            if (ev.eval(x).lsb >= 0) return false;
+            return !powerOfTwo(fs.back());
+        }
+        if (!twoFactors(x, a, b)) return false;
         if (ev.eval(x).lsb >= 0) return false;  // integer arithmetic does not round
         return !(powerOfTwo(a) || powerOfTwo(b));
     }

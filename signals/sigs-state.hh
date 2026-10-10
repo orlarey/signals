@@ -158,6 +158,7 @@ struct State {
     Sym                                         SIGMIX{};
     Sym                                         SIGTPT{};
     Sym                                         SIGNEG{};
+    Sym                                         SIGPROD{};
     int                                         gMaxFIRSize{1024};  // -mfs threshold (port)
     Sym                                         SIGPREFIX{};
     Sym                                         SIGRDTBL{};
