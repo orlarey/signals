@@ -658,9 +658,14 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         if (it != memo.end()) return it->second;
         bool r = false;
         int  op;
-        Tree x, y, z;
+        Tree x, y, z, w;
+        // the operations of the current sample : the binary ones, casts, select2, the
+        // primitives, and the compound operations of the normal form (sum, negation,
+        // remainders, tpt, mix) ; a FIR or an IIR reads the past and stops the walk
         const bool instantaneous = isSigBinOp(t, &op, x, y) || isSigIntCast(t, x) ||
                                    isSigFloatCast(t, x) || isSigSelect2(t, x, y, z) ||
+                                   isSigSum(t) || isSigNeg(t, x) || isSigFrac(t, x) ||
+                                   isSigCfrac(t, x) || isSigTpt(t, x) || isSigMix(t, x, y, w) ||
                                    getUserData(t) != nullptr;
         if (instantaneous) {
             for (int j = 0; j < t->arity() && !r; j++) r = readsRefined(t->branch(j), keys, memo);
