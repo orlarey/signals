@@ -258,6 +258,34 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         return isSigSum(t, subs) && subs.size() == 2 && isOneConst(subs[0]) && isSigNeg(subs[1], c);
     }
 
+    /// w is 1 - c : a binary 1 - c, or the Sum(1, neg(t1), ..., neg(tn)) of the normal
+    /// form, c being t1 or the Sum(t1, ..., tn) of the same terms
+    static bool complementPair(Tree w, Tree c)
+    {
+        Tree x;
+        tvec ws, cs;
+        if (complementOf(w, x) && sameValue(x, c)) return true;
+        if (!isSigSum(w, ws) || ws.size() < 3 || !isOneConst(ws[0])) return false;
+        if (!isSigSum(c, cs) || cs.size() != ws.size() - 1) return false;
+        for (size_t i = 1; i < ws.size(); i++) {
+            if (!isSigNeg(ws[i], x) || !sameValue(x, cs[i - 1])) return false;
+        }
+        return true;
+    }
+
+    /// w is 1 - c for some c, in either writing
+    static bool isComplement(Tree w)
+    {
+        Tree x;
+        tvec ws;
+        if (complementOf(w, x)) return true;
+        if (!isSigSum(w, ws) || ws.size() < 3 || !isOneConst(ws[0])) return false;
+        for (size_t i = 1; i < ws.size(); i++) {
+            if (!isSigNeg(ws[i], x)) return false;
+        }
+        return true;
+    }
+
     /// does the product t (flattened) hold a factor 1 - c
     static bool hasComplementFactor(Tree t)
     {
@@ -271,7 +299,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             }
             return false;
         }
-        return complementOf(t, a);
+        return isComplement(t);
     }
 
     /// t is abs(x)
@@ -469,11 +497,10 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         productFactors(t2, f2);
         if (f1.size() < 2 || f2.size() < 2) return false;
         for (size_t i = 0; i < f1.size(); i++) {
-            Tree k;
-            if (!complementOf(f1[i], k)) continue;
+            if (!isComplement(f1[i])) continue;
             for (size_t j = 0; j < f2.size(); j++) {
-                if (!sameValue(f2[j], k)) continue;
-                c = k;
+                if (!complementPair(f1[i], f2[j])) continue;
+                c = f2[j];
                 a.clear();
                 b.clear();
                 for (size_t m = 0; m < f1.size(); m++) {
@@ -1109,8 +1136,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         productFactors(sig->branch(1), fs);
         int found = -1;
         for (size_t i = 0; i < fs.size(); i++) {
-            Tree k;
-            if (complementOf(fs[i], k) && sameValue(k, a)) {
+            if (complementPair(fs[i], a)) {
                 found = int(i);
                 break;
             }

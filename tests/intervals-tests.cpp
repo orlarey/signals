@@ -577,9 +577,28 @@ static void mixes()
         Tree f       = slider("freq" + p, 440, 50, 1000);
         Tree sf      = rec1("sf", [&](Tree y) { return sigAdd(sigMul(sigSub(one(), pl), f), sigMul(pl, y)); });
         Tree inverse = sigDiv(sigReal(48000), sf);
-        Tree o       = outs({smooth, flat, sf, inverse, sigIntCast(sigAdd(smooth, sigReal(12)))});
+        // the n-ary writing of the normal form : Sum(Prod(Sum(1, neg(c)), s), Prod(c, y')), the
+        // weight a control c, or a sum of two controls c = a + b, 1 - c = Sum(1, neg(a), neg(b))
+        Tree c       = slider("pole" + p, 0.5, 0, 0.999);
+        Tree nary    = rec1("nary", [&](Tree y) {
+            return sigSum({sigProd({sigSum({one(), sigNeg(c)}), s}), sigProd({c, y})});
+        });
+        Tree ca      = slider("pa" + p, 0.2, 0, 0.5);
+        Tree cb      = slider("pb" + p, 0.2, 0, 0.499);
+        Tree cab     = sigSum({ca, cb});
+        Tree nary2   = rec1("nary2", [&](Tree y) {
+            return sigSum({sigProd({sigSum({one(), sigNeg(ca), sigNeg(cb)}), s}), sigProd({cab, y})});
+        });
+        Tree bin     = rec1("bin", [&](Tree y) { return sigAdd(sigMul(sigSub(one(), c), s), sigMul(c, y)); });
+        Tree o       = outs({smooth, flat, sf, inverse, sigIntCast(sigAdd(smooth, sigReal(12))), nary, nary2, bin});
         itv::programPrecision() = precision;
         typeAnnotation(o, false);
+        check(itvOf(bin).lo() > -12.2 && itvOf(bin).hi() < 12.2,
+              "precision : a smoother of [-12, 12] by a control pole stays near [-12, 12]" + p);
+        check(itvOf(nary).lo() == itvOf(bin).lo() && itvOf(nary).hi() == itvOf(bin).hi(),
+              "precision : written Sum(Prod(Sum(1, neg(c)), s), Prod(c, y')), the same bounds" + p);
+        check(itvOf(nary2).lo() == itvOf(bin).lo() && itvOf(nary2).hi() == itvOf(bin).hi(),
+              "precision : its weight a sum of two controls, 1 - c = Sum(1, neg(a), neg(b))" + p);
         check(itvOf(smooth).lo() > -12.1 && itvOf(smooth).hi() < 12.1,
               "precision : a smoother of [-12, 12] stays near [-12, 12]" + p);
         // from the initial 0 : (1 - p) 220 = 0.22 at the first sample, at most 880 after,
