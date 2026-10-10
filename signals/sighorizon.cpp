@@ -1120,6 +1120,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         if (rotationBody(sig, ev, r)) return r;
         if (isSigIIR(sig) && firstOrderMix(sig, c, ev, r)) return r;
         if (isSigIIR(sig) && integerAccumulator(sig, c, r)) return r;
+        if (isSigIIR(sig)) return iirBound(sig, c);
         if (isSum(sig) && hasRoundingTerm(sig) && fractionalSum(sig, ev, r)) return r;
         if (isSum(sig) && hasComplementTerm(sig) && mixSum(sig, ev, r)) return r;
         // A table read : the library cannot certify it (the table extent is not part
@@ -1146,6 +1147,80 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             return r;
         }
         return itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, c, ev);
+    }
+
+    //--- the IIR : two sound bounds, intersected ---------------------------------------
+    // IIR[nil, x, 0, C1, ..., Cn] : y = x + sum C_k y@k. Its certified gain (the intervals'
+    // Iir) bounds a stable filter with constant coefficients ; its definition, iterated as
+    // the fixpoint of a recursive group (probe, ascending Kleene with widening,
+    // narrowing), gives the bound the recursion had before the reveal. Both enclose the
+    // values of the program : so does their intersection, never worse than either.
+    AffItv iirDefinition(Tree sig, const AffItv& x, const std::vector<AffItv>& cs) const
+    {
+        auto step = [&](const AffItv& y) {
+            AffItv acc = x;
+            for (size_t k = 0; k < cs.size(); k++) {
+                const AffItv& ck = cs[k];
+                if (ck.isConst() && ck.a0 == 0 && ck.b0 == 0 && !ck.mayBeInvalid) continue;
+                acc = this->Add(acc, this->Mul(ck, this->Delay(y, this->IntNum(int(k) + 1))));
+            }
+            return acc;
+        };
+        fExtrapolation.erase(sig);  // the widening state of this node, afresh
+        // the probe : the first seed of the ladder that the definition maps into itself
+        bool   certified = false;
+        AffItv probed    = bottom(sig);
+        for (const AffItv& s : probeSeeds(sig)) {
+            const AffItv f = step(s);
+            if (lessEqual(f, s)) {
+                certified = true;
+                probed    = f;
+                for (int n = 0; n < maxNarrowingIterations(); n++) {
+                    const AffItv g = step(probed);
+                    const bool   d = converged(probed, g);
+                    probed         = g;
+                    if (d) break;
+                }
+                break;
+            }
+        }
+        recordProbe(sig, probed, certified);
+        // the ascending pass, widened beyond widenAfter, then narrowed
+        AffItv y    = bottom(sig);
+        bool   done = false;
+        for (int it = 1; !done && it <= maxIterations(); it++) {
+            AffItv f = step(y);
+            if (it > widenAfter()) f = widen(sig, y, f);
+            done = converged(y, f);
+            y    = f;
+        }
+        if (!done) return top(sig);
+        for (int n = 0; n < maxNarrowingIterations(); n++) {
+            const AffItv g = step(y);
+            const bool   d = converged(y, g);
+            y              = g;
+            if (d) break;
+        }
+        return y;
+    }
+
+    AffItv iirBound(Tree sig, const std::vector<AffItv>& c) const
+    {
+        const std::vector<AffItv> cs(c.begin() + 3, c.end());
+        const AffItv              gain = this->Iir(c[1], cs);
+        const AffItv              def  = iirDefinition(sig, c[1], cs);
+        if (gain.isEmpty() || def.isEmpty()) return itv::aempty();
+        const interval ig = itv::toItv(gain, fT), id = itv::toItv(def, fT);
+        const bool     gb = ig.isBounded(), db = id.isBounded();
+        if (!gb && !db) return def.withInvalid(gain.mayBeInvalid && def.mayBeInvalid);
+        if (!gb) return def;
+        if (!db) return gain;
+        // both bounded : their intersection ; NaN only when both allow it
+        const double lo = std::max(ig.lo(), id.lo()), hi = std::min(ig.hi(), id.hi());
+        AffItv       r  = (ig.hi() - ig.lo() <= id.hi() - id.lo()) ? gain : def;
+        if (lo <= hi) r = itv::fromItv(interval(lo, hi, std::min(ig.lsb(), id.lsb())));
+        r.mayBeInvalid = gain.mayBeInvalid && def.mayBeInvalid;
+        return r;
     }
 
     /// defaultParams: parameters held at their DEFAULT values (nominal reading) instead

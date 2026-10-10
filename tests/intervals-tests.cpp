@@ -825,7 +825,10 @@ static void kernels()
               "precision : the pink noise filter of [-1, 1] is within its certified gain" + p);
         check(itvOf(smooth).isValid() && itvOf(smooth).lo() > -1e-6 && itvOf(smooth).hi() < 100.01,
               "precision : a smoother of [0, 1] by 0.99 is [0, 100]" + p);
-        check(!itvOf(integ).isValid() && !itvOf(integ).isBounded(), "validity : a float integrator may be anything" + p);
+        // no gain for an integrator : its definition iterated over the horizon, as its
+        // recursion was, keeps it finite and valid (|y| <= 2^31 over 2^31 samples)
+        check(itvOf(integ).isValid() && (precision == 1 || itvOf(integ).hi() <= 2.2e9),
+              "validity : an integrator is what its recursion was over the horizon" + p);
         check(itvOf(fir).lo() <= -2 && itvOf(fir).lo() > -2.001 && itvOf(fir).hi() >= 1 && itvOf(fir).hi() < 1.001,
               "precision : fir of [0, 1] by (1, 0, -2) is [-2, 1]" + p);
         check(itvOf(sum).lo() <= 1 && itvOf(sum).lo() > 0.999 && itvOf(sum).hi() >= 4 && itvOf(sum).hi() < 4.001,
