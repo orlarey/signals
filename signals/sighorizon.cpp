@@ -138,7 +138,44 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         return false;
     }
 
-    /// t is a sum : a binary + or -, or the n-ary Sum of the -fir form
+    /// t is x + k, k a number : a binary + or -, or the two-term Sum of the normal form,
+    /// whose number follows the term ; x - k gives -k, and k - x gives x negated (sign -1)
+    static bool shiftOf(Tree t, Tree& x, double& k, int& sign)
+    {
+        int  op;
+        Tree a, b;
+        tvec subs;
+        if (isSigBinOp(t, &op, a, b) && (op == kAdd || op == kSub)) {
+            if (constNum(b, k)) {
+                x    = a;
+                k    = (op == kAdd) ? k : -k;
+                sign = 1;
+                return true;
+            }
+            if (constNum(a, k)) {
+                x    = b;
+                sign = (op == kAdd) ? 1 : -1;
+                return true;
+            }
+            return false;
+        }
+        if (isSigSum(t, subs) && subs.size() == 2) {
+            Tree u;
+            if (constNum(subs[1], k)) {
+                u = subs[0];
+            } else if (constNum(subs[0], k)) {
+                u = subs[1];
+            } else {
+                return false;
+            }
+            sign = negationOf(u, x) ? -1 : 1;
+            if (sign > 0) x = u;
+            return true;
+        }
+        return false;
+    }
+
+    /// t is a sum : a binary + or -, or the n-ary Sum of the normal form
     static bool isSum(Tree t)
     {
         int  op;
@@ -182,16 +219,17 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         out.push_back(t);
     }
 
-    /// t is 1 - c
+    /// t is 1 - c : a binary -, or the Sum 1 + neg(c) of the normal form
     static bool complementOf(Tree t, Tree& c)
     {
         int  op;
         Tree a, b;
+        tvec subs;
         if (isSigBinOp(t, &op, a, b) && op == kSub && isOneConst(a)) {
             c = b;
             return true;
         }
-        return false;
+        return isSigSum(t, subs) && subs.size() == 2 && isOneConst(subs[0]) && isSigNeg(subs[1], c);
     }
 
     /// does the product t (flattened) hold a factor 1 - c
@@ -607,6 +645,23 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             if (op == kSub && constNum(x, k)) narrowTo(y, shifted(k - n.hi(), k - n.lo()), ov, ev, depth + 1);
             return;
         }
+        if (int sign; isSigSum(t) && shiftOf(t, x, k, sign)) {
+            // x + k, or k - x : the same steps as the binary writing
+            const double m = std::ldexp(1.0, -20);
+            auto shifted = [m](double lo, double hi) {
+                return interval(lo - std::abs(lo) * m - std::ldexp(1.0, -1000), hi + std::abs(hi) * m + std::ldexp(1.0, -1000));
+            };
+            if (sign > 0) {
+                narrowTo(x, shifted(n.lo() - k, n.hi() - k), ov, ev, depth + 1);
+            } else {
+                narrowTo(x, shifted(k - n.hi(), k - n.lo()), ov, ev, depth + 1);
+            }
+            return;
+        }
+        if (isSigNeg(t, x)) {
+            narrowTo(x, interval(-n.hi(), -n.lo()), ov, ev, depth + 1);
+            return;
+        }
         if (absArg(t, x)) {
             // abs is the value itself on a nonnegative x, its opposite on a nonpositive
             // one ; otherwise the value or its opposite
@@ -635,6 +690,14 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             if ((op == kMul || op == kAdd) && constNum(x, k)) chainOf(y, keys, depth + 1);
             if ((op == kDiv || op == kSub) && constNum(y, k)) chainOf(x, keys, depth + 1);
             if (op == kSub && constNum(x, k)) chainOf(y, keys, depth + 1);
+            return;
+        }
+        if (int sign; isSigSum(t) && shiftOf(t, x, k, sign)) {
+            chainOf(x, keys, depth + 1);
+            return;
+        }
+        if (isSigNeg(t, x)) {
+            chainOf(x, keys, depth + 1);
             return;
         }
         if (absArg(t, x)) chainOf(x, keys, depth + 1);
@@ -808,8 +871,9 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
                     which = i;
                 } else if (constNum(f, k)) {
                     c.k *= k;
-                } else if (isSigBinOp(f, &op, z, x) && op == kSub && constNum(z, k) && k == 0) {
-                    c.k = -c.k;  // 0 - s
+                } else if ((isSigBinOp(f, &op, z, x) && op == kSub && constNum(z, k) && k == 0) ||
+                           isSigNeg(f, x)) {
+                    c.k = -c.k;  // 0 - s, or neg(s)
                     if (c.f) simple = false;
                     c.f = x;
                 } else {
@@ -836,8 +900,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         double k   = 1, v;
         bool   imp = false;
         for (Tree f : fs) {
-            int  op;
-            Tree a, b, d, n, x;
+            Tree b, d, n, x;
             if (isSigFloatCast(f, x)) f = x;  // float(1 - 1') is still the impulse
             tvec fir;
             double c0, c1;
@@ -849,8 +912,8 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             }
             if (constNum(f, v)) {
                 k *= v;
-            } else if (!imp && isSigBinOp(f, &op, a, b) && op == kSub && constNum(a, v) && v == 1 &&
-                       isSigDelay(b, d, n) && constNum(d, v) && v == 1 && constNum(n, v) && v == 1) {
+            } else if (!imp && complementOf(f, b) && isSigDelay(b, d, n) && constNum(d, v) && v == 1 &&
+                       constNum(n, v) && v == 1) {
                 imp = true;
             } else {
                 return false;
