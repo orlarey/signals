@@ -162,6 +162,11 @@ class NatureAlgebra : public SignalAlgebra<int> {
     int Exp(const int&) const override { return kReal; }
     int Exp10(const int&) const override { return kReal; }
     int Floor(const int&) const override { return kReal; }
+    // the compound operations compute in floating point (a floor, a division, a 1.0)
+    int Frac(const int& x) const override { return x | kReal; }
+    int Cfrac(const int& x) const override { return x | kReal; }
+    int Mix(const int& c, const int& a, const int& b) const override { return kReal | c | a | b; }
+    int Tpt(const int&) const override { return kReal; }
     int Log(const int&) const override { return kReal; }
     int Log10(const int&) const override { return kReal; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -317,6 +322,11 @@ class VariabilityAlgebra : public SignalAlgebra<int> {
     int Exp(const int& x) const override { return x; }
     int Exp10(const int& x) const override { return x; }
     int Floor(const int& x) const override { return x; }
+    // the compound operations : the variability of their operands (the constant 1.0 is kKonst)
+    int Frac(const int& x) const override { return x; }
+    int Cfrac(const int& x) const override { return x; }
+    int Mix(const int& c, const int& a, const int& b) const override { return kKonst | c | a | b; }
+    int Tpt(const int& x) const override { return x | kKonst; }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -466,6 +476,11 @@ class ComputabilityAlgebra : public SignalAlgebra<int> {
     int Exp(const int& x) const override { return x; }
     int Exp10(const int& x) const override { return x; }
     int Floor(const int& x) const override { return x; }
+    // the compound operations : the computability of their operands (the constant 1.0 is kComp)
+    int Frac(const int& x) const override { return x; }
+    int Cfrac(const int& x) const override { return x; }
+    int Mix(const int& c, const int& a, const int& b) const override { return kComp | c | a | b; }
+    int Tpt(const int& x) const override { return x | kComp; }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -619,6 +634,11 @@ class VectorabilityAlgebra : public SignalAlgebra<int> {
     int Exp(const int& x) const override { return x; }
     int Exp10(const int& x) const override { return x; }
     int Floor(const int& x) const override { return x; }
+    // the compound operations : the vectorability of their operands (the constant 1.0 is kVect)
+    int Frac(const int& x) const override { return x; }
+    int Cfrac(const int& x) const override { return x; }
+    int Mix(const int& c, const int& a, const int& b) const override { return kVect | c | a | b; }
+    int Tpt(const int& x) const override { return x | kVect; }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }
@@ -764,6 +784,12 @@ class BooleanAlgebra : public SignalAlgebra<int> {
     int Exp(const int& x) const override { return x; }
     int Exp10(const int& x) const override { return x; }
     int Floor(const int& x) const override { return x; }
+    // the compound operations : the booleanity of their definition : frac of a boolean is 0, a mix or a
+    // tpt is numeric (the constant 1.0 is kNum)
+    int Frac(const int& x) const override { return x; }
+    int Cfrac(const int& x) const override { return x; }
+    int Mix(const int& c, const int& a, const int& b) const override { return kNum | c | a | b; }
+    int Tpt(const int& x) const override { return x | kNum; }
     int Log(const int& x) const override { return x; }
     int Log10(const int& x) const override { return x; }
     int Pow(const int& x, const int& y) const override { return x | y; }

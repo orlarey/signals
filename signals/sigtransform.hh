@@ -261,6 +261,15 @@ class SIGS_API TransformAlgebra : public SignalDispatch<XSig> {
     XSig Or(const XSig& x, const XSig& y) const override { return o(fBuild.Or(x.out, y.out)); }
     XSig Xor(const XSig& x, const XSig& y) const override { return o(fBuild.Xor(x.out, y.out)); }
 
+    //--- compound operations : nodes of their own, rebuilt as such ---------------------
+    XSig Frac(const XSig& x) const override { return o(fBuild.Frac(x.out)); }
+    XSig Cfrac(const XSig& x) const override { return o(fBuild.Cfrac(x.out)); }
+    XSig Mix(const XSig& c, const XSig& a, const XSig& b) const override
+    {
+        return o(fBuild.Mix(c.out, a.out, b.out));
+    }
+    XSig Tpt(const XSig& x) const override { return o(fBuild.Tpt(x.out)); }
+
     //--- extended primitives (per-op forms: ex-nihilo construction only) --------------
     XSig Abs(const XSig& x) const override { return o(fBuild.Abs(x.out)); }
     XSig Acos(const XSig& x) const override { return o(fBuild.Acos(x.out)); }

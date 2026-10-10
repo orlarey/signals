@@ -1083,6 +1083,56 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         return true;
     }
 
+    //--- the compound operations : the operand seen ---------------------------------
+    // The library bounds frac(x) and cfrac(x) with a margin of half an ulp of x : a
+    // compiler may contract the product computing x with the subtraction, reading x
+    // exactly on one side and rounded on the other. Seeing the tree, the margin goes
+    // when no contraction can happen : x is not a real product, or a product by a
+    // power of 2 (exact, so both readings agree) -- the scaled phase 2^30 (d - rint d)
+    // of the fixed-point phasor. The result is then exactly within its range.
+    static bool powerOfTwo(Tree t)
+    {
+        double v;
+        if (!constNum(t, v) || v == 0 || !std::isfinite(v)) return false;
+        int e;
+        return std::frexp(std::abs(v), &e) == 0.5;
+    }
+
+    /// x may be a product a compiler contracts with the subtraction that follows
+    bool contractible(Tree x, FixPointEvaluator<AffItv>& ev) const
+    {
+        int  op;
+        Tree a, b;
+        if (!isSigBinOp(x, &op, a, b) || op != kMul) return false;
+        if (ev.eval(x).lsb >= 0) return false;  // integer arithmetic does not round
+        return !(powerOfTwo(a) || powerOfTwo(b));
+    }
+
+    bool exactRemainder(Tree sig, const std::vector<AffItv>& c, FixPointEvaluator<AffItv>& ev,
+                        AffItv& result) const
+    {
+        Tree x;
+        bool frac = isSigFrac(sig, x);
+        if (!frac && !isSigCfrac(sig, x)) return false;
+        if (contractible(x, ev)) return false;
+        result = itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, c, ev);
+        if (result.isEmpty() || !result.isConst()) return true;
+        const interval ix = itv::toItv(c[0], fT);
+        double         lo = -0.5, hi = 0.5;
+        if (frac) {
+            lo = 0;
+            hi = 1;
+            if (!ix.isEmpty() && ix.lo() >= 0) {
+                hi = itv::programPrecision() == 1 ? double(std::nextafter(1.0f, 0.0f))
+                     : itv::programPrecision() == 2 ? std::nextafter(1.0, 0.0)
+                                                    : 1.0;
+            }
+        }
+        result.a0 = std::max(result.a0, lo);
+        result.b0 = std::min(result.b0, hi);
+        return true;
+    }
+
     //--- the rules, in order ----------------------------------------------------------
 
     AffItv combine(Tree sig, const std::vector<AffItv>& c,
@@ -1092,6 +1142,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         // each one sound on its own ; a node they do not recognize gets the
         // library's rule.
         AffItv r;
+        if (exactRemainder(sig, c, ev, r)) return r;
         if (guardedSelect(sig, c, ev, r)) return r;
         if (rotationBody(sig, ev, r)) return r;
         if (isSigIIR(sig) && firstOrderMix(sig, c, ev, r)) return r;

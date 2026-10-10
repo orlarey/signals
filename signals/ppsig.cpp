@@ -296,6 +296,16 @@ ostream& ppsig::print(ostream& fout) const
         printfun(fout, "select2", sel, x, y);
     }
 
+    else if (isSigFrac(fSig, x)) {
+        printfun(fout, "frac", x);
+    } else if (isSigCfrac(fSig, x)) {
+        printfun(fout, "cfrac", x);
+    } else if (isSigMix(fSig, sel, x, y)) {
+        printfun(fout, "mix", sel, x, y);
+    } else if (isSigTpt(fSig, x)) {
+        printfun(fout, "tpt", x);
+    }
+
     else if (isSigIntCast(fSig, x)) {
         printfun(fout, "int", x);
     } else if (isSigBitCast(fSig, x)) {
@@ -590,6 +600,16 @@ ostream& ppsigShared::print(ostream& fout) const
 
     else if (isSigSelect2(fSig, sel, x, y)) {
         SIG_INSERT_ID(printfun(s, "select2", sel, x, y));
+    }
+
+    else if (isSigFrac(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "frac", x));
+    } else if (isSigCfrac(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "cfrac", x));
+    } else if (isSigMix(fSig, sel, x, y)) {
+        SIG_INSERT_ID(printfun(s, "mix", sel, x, y));
+    } else if (isSigTpt(fSig, x)) {
+        SIG_INSERT_ID(printfun(s, "tpt", x));
     }
 
     else if (isSigIntCast(fSig, x)) {

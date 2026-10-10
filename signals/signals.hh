@@ -396,4 +396,22 @@ SIGS_API Tree sigSum(const tvec& sigsubs);
 SIGS_API bool isSigSum(Tree s);
 SIGS_API bool isSigSum(Tree s, tvec& sigsubs);
 
+/*****************************************************************************
+                             Compound operations
+    Each one is its definition, written once so that its repeated operand
+    appears once : frac(x) = x - floor(x), cfrac(x) = x - rint(x),
+    mix(c, a, b) = (1 - c) * a + c * b, tpt(x) = x / (x + 1) (FaustAlgebra).
+
+    The node's children are the operation's arguments ; a code generator
+    writes the definition, as it writes a sum or a FIR.
+*****************************************************************************/
+SIGS_API Tree sigFrac(Tree x);
+SIGS_API bool isSigFrac(Tree s, Tree& x);
+SIGS_API Tree sigCfrac(Tree x);
+SIGS_API bool isSigCfrac(Tree s, Tree& x);
+SIGS_API Tree sigMix(Tree c, Tree a, Tree b);
+SIGS_API bool isSigMix(Tree s, Tree& c, Tree& a, Tree& b);
+SIGS_API Tree sigTpt(Tree x);
+SIGS_API bool isSigTpt(Tree s, Tree& x);
+
 #endif

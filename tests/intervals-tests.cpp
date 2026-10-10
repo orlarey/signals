@@ -51,6 +51,8 @@
 #include "ppsig.hh"
 #include "sigs-config.hh"
 #include "sigs-state.hh"
+#include "sigtransform.hh"
+#include "sigtreealgebra.hh"
 #include "signals.hh"
 #include "sigtype.hh"
 #include "sigtyperules.hh"
@@ -305,6 +307,25 @@ class Evaluator {
         if (isSigSelect2(t, x, y, z)) {
             const double s = at(x, n), a = at(y, n), b = at(z, n);
             return s != 0 ? b : a;
+        }
+        if (isSigFrac(t, x) || isSigCfrac(t, x)) {
+            const bool frac = isSigFrac(t, x);
+            auto       round = [&](T v) { return frac ? std::floor(v) : std::rint(v); };
+            Tree       a, b;
+            if (fRun.fma && realProduct(x, a, b)) {  // the product contracted with the subtraction
+                const T pa = r(at(a, n)), pb = r(at(b, n));
+                return std::fma(pa, pb, -round(pa * pb));
+            }
+            const T v = r(at(x, n));
+            return v - round(v);
+        }
+        if (isSigTpt(t, x)) {
+            const T v = r(at(x, n));
+            return v / (v + T(1));
+        }
+        if (isSigMix(t, x, y, z)) {
+            const T c = r(at(x, n)), a = r(at(y, n)), b = r(at(z, n)), w = T(1) - c;
+            return fRun.fma ? std::fma(c, b, w * a) : w * a + c * b;
         }
         if (isSigIntCast(t, x)) return toInt(t, at(x, n));
         if (isSigFloatCast(t, x)) return r(at(x, n));
@@ -695,6 +716,93 @@ static void firForms()
     }
 }
 
+static void nodes()
+{
+    section("the compound nodes frac, cfrac, mix, tpt");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        // a phasor written with frac : the operand is a sum, no margin
+        Tree inc   = slider("ninc" + p, 0.01, 0.0, 0.5);
+        Tree phase = rec1("nphase", [&](Tree y) { return sigFrac(sigAdd(y, inc)); });
+        // the fixed-point phasor : frac of 2^30 cfrac(d), a product by a power of 2, exact
+        Tree d     = sigMul(slider("nf" + p, 1, 0, 10), sigReal(1.0 / 50));
+        Tree fixed = sigFrac(sigMul(sigReal(1073741824.0), sigCfrac(d)));
+        Tree bits  = sigIntCast(sigMul(sigReal(16777216.0), fixed));
+        // frac of an arbitrary product : the margin of a contraction stays
+        Tree prod  = sigFrac(sigMul(slider("na" + p, 3, 1, 1000), slider("nb" + p, 2, 1, 1000)));
+        // a smoother written with mix, and a mix beyond its premise
+        Tree s      = slider("ns" + p, 0, -12, 12);
+        Tree smooth = rec1("nsmooth", [&](Tree y) { return sigMix(sigReal(0.999), s, y); });
+        Tree wide   = sigMix(slider("nc" + p, 0.5, -1, 2), slider("nu" + p, 0, 0, 1), slider("nv" + p, 1, 0, 1));
+        // the gain of a trapezoidal integrator, g / (1 + g), and its pole crossed
+        Tree gain   = sigTpt(slider("ng" + p, 1, 0, 1000));
+        Tree pole   = sigTpt(slider("nh" + p, 1, -2, 2));
+        Tree o      = outs({phase, fixed, bits, prod, smooth, wide, gain, pole});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        const double below = precision == 1 ? double(std::nextafter(1.0f, 0.0f)) : std::nextafter(1.0, 0.0);
+        check(itvOf(phase).lo() == 0 && itvOf(phase).hi() == below && itvOf(phase).isValid(),
+              "precision : frac(y' + inc) is exactly [0, 1[" + p);
+        // cfrac(d) keeps the margin of d = f / 50 (a contractible product) : the operand may be
+        // slightly negative, so frac may reach 1 ; the power of 2 itself adds no margin
+        check(itvOf(fixed).lo() == 0 && itvOf(fixed).hi() == 1,
+              "precision : frac of 2^30 cfrac(d) is exactly [0, 1] (a power of 2 does not round)" + p);
+        check(itvOf(bits).isValid() && itvOf(bits).hi() <= 16777216,
+              "validity : int(2^24 frac(2^30 cfrac(d))) is valid and below 2^24" + p);
+        check(itvOf(prod).lo() < 0 && itvOf(prod).hi() > 1,
+              "precision : frac of an arbitrary product keeps the margin of a contraction" + p);
+        check(itvOf(smooth).lo() > -12.1 && itvOf(smooth).hi() < 12.1, "precision : mix(0.999, s, y') stays in [-12, 12]" + p);
+        check(itvOf(wide).lo() < -0.5 && itvOf(wide).hi() > 1.5, "precision : beyond c in [0, 1], mix is its definition" + p);
+        check(itvOf(gain).lo() <= 0 && itvOf(gain).lo() > -1e-6 && itvOf(gain).hi() < 1 && itvOf(gain).isValid(),
+              "precision : tpt(g) for g in [0, 1000] lies in [0, 1[" + p);
+        check(!itvOf(pole).isBounded() || !itvOf(pole).isValid(),
+              "precision : tpt(g) for g reaching -1 is its definition, unbounded" + p);
+        inclusion("compound nodes", o, precision);
+        // a transformation rebuilds the nodes as such : the default definition of the
+        // algebra (x - floor(x), ...) must not lower them on the way
+        Tree             flat = outs({fixed, prod, wide, gain});
+        TransformAlgebra identity;
+        check(signalTransform(flat, identity) == flat, "a transformation keeps frac, cfrac, mix and tpt" + p);
+        TreeAlgebra B;
+        // the exact attributes of a compound node are those of its definition written out
+        {
+            Tree ic = sigIntCast(slider("ni" + p, 1, 0, 9));  // an integer operand too
+            Tree u  = slider("nu" + p, 0, 0, 1);
+            std::vector<std::pair<Tree, Tree>> pairs;
+            for (Tree x : {u, ic}) {
+                pairs.push_back({sigFrac(x), B.Sub(x, B.Floor(x))});
+                pairs.push_back({sigCfrac(x), B.Sub(x, B.Rint(x))});
+                pairs.push_back({sigTpt(x), B.Div(x, B.Add(x, B.FloatNum(1.0)))});
+                pairs.push_back({sigMix(x, u, ic), B.Add(B.Mul(B.Sub(B.FloatNum(1.0), x), u), B.Mul(x, ic))});
+            }
+            std::vector<Tree> all;
+            for (const auto& q : pairs) all.push_back(q.first), all.push_back(q.second);
+            Tree list = nil();
+            for (Tree t : all) list = cons(t, list);
+            typeAnnotation(list, false);
+            bool same = true;
+            for (const auto& q : pairs) {
+                Type t1 = getCertifiedSigType(q.first), t2 = getCertifiedSigType(q.second);
+                same = same && t1->nature() == t2->nature() && t1->variability() == t2->variability() &&
+                       t1->computability() == t2->computability() &&
+                       t1->vectorability() == t2->vectorability() && t1->boolean() == t2->boolean();
+            }
+            check(same, "the exact attributes of the compound nodes are those of their definitions" + p);
+        }
+        // the correspondence with FaustAlgebra : a node's children are exactly the
+        // arguments of its operation, in order
+        {
+            Tree x = slider("nx" + p, 0, 0, 1), c = slider("nc2" + p, 0, 0, 1), a = slider("na" + p, 0, 0, 1);
+            Tree f = sigFrac(x), r = sigCfrac(x), t = sigTpt(x), m = sigMix(c, a, x);
+            check(f->arity() == 1 && f->branch(0) == x && r->arity() == 1 && r->branch(0) == x &&
+                      t->arity() == 1 && t->branch(0) == x && m->arity() == 3 && m->branch(0) == c &&
+                      m->branch(1) == a && m->branch(2) == x && B.Frac(x) == f && B.Cfrac(x) == r &&
+                      B.Tpt(x) == t && B.Mix(c, a, x) == m,
+                  "the children of a compound node are the arguments of its operation" + p);
+        }
+    }
+}
+
 static void invalidities()
 {
     section("what must stay invalid");
@@ -741,6 +849,7 @@ int main()
     tables();
     rotations();
     firForms();
+    nodes();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;

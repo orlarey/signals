@@ -181,6 +181,15 @@ class SIGS_API TreeAlgebra : public SignalDispatch<Tree> {
     {
         return tree(sigs::g.SIGSELECT2, sel, x, y);
     }
+    // the compound operations stay nodes : their definition is the business of the code
+    // generators, as for a sum or a FIR
+    Tree Frac(const Tree& x) const override { return tree(sigs::g.SIGFRAC, x); }
+    Tree Cfrac(const Tree& x) const override { return tree(sigs::g.SIGCFRAC, x); }
+    Tree Mix(const Tree& c, const Tree& a, const Tree& b) const override
+    {
+        return tree(sigs::g.SIGMIX, c, a, b);
+    }
+    Tree Tpt(const Tree& x) const override { return tree(sigs::g.SIGTPT, x); }
     Tree AssertBounds(const Tree& lo, const Tree& hi, const Tree& x) const override
     {
         return tree(sigs::g.SIGASSERTBOUNDS, lo, hi, x);
