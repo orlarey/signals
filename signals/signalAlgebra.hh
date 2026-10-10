@@ -378,8 +378,8 @@ V SignalDispatch<V>::combine(Tree sig, const std::vector<V>& c,
                 return this->Fir(c[0], coefs);
             }
             case sigs::SignalOpcode::Iir: {
-                std::vector<V> coefs(c.begin() + 3, c.end());
-                return this->Iir(c[1], coefs);
+                std::vector<V> coefs(c.begin() + 1, c.end());
+                return this->Iir(c[0], coefs);
             }
 
             // temp(x) = x : a staging barrier for the emitter, transparent

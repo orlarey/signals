@@ -1121,7 +1121,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
 
     //--- the one-pole smoother and the accumulator of the -fir form -------------------
 
-    // The one-pole smoother in the -fir form, IIR[, (1 - a) * A, 0, a] : y(n) = (1 - a) A(n)
+    // The one-pole smoother as an IIR, IIR[(1 - a) * A, a] : y(n) = (1 - a) A(n)
     // + a y(n-1), y(-1) = 0, a convex mix of A and of the previous output, so y stays
     // between 0 and the extremes of A. In the program each step adds at most 3 rounding
     // errors of its operands while the pole contracts the excess by 1 - a : the excess
@@ -1130,10 +1130,10 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     bool firstOrderMix(Tree sig, const std::vector<AffItv>& c, FixPointEvaluator<AffItv>& ev,
                        AffItv& result) const
     {
-        if (c.size() != 4) return false;
-        Tree              a = sig->branch(3);
+        if (c.size() != 2) return false;
+        Tree              a = sig->branch(1);
         std::vector<Tree> fs;
-        productFactors(sig->branch(1), fs);
+        productFactors(sig->branch(0), fs);
         int found = -1;
         for (size_t i = 0; i < fs.size(); i++) {
             if (complementPair(fs[i], a)) {
@@ -1142,7 +1142,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             }
         }
         if (found < 0 || fs.size() < 2) return false;
-        const interval ia = itv::toItv(c[3], fT);
+        const interval ia = itv::toItv(c[1], fT);
         if (ia.isEmpty() || ia.lo() < 0 || ia.hi() >= 1) return false;
         // A : the product of the other factors of the input, evaluated directly
         interval iA;
@@ -1169,19 +1169,19 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         if (iA.lo() >= 0) lo = (1 - ia.hi()) * iA.lo() * shrink;
         if (iA.hi() <= 0) hi = (1 - ia.hi()) * iA.hi() * shrink;
         result = itv::fromItv(interval(lo, hi, std::min(iA.lsb(), ia.lsb()),
-                                       prod.mayBeInvalid || c[1].mayBeInvalid || c[3].mayBeInvalid));
+                                       prod.mayBeInvalid || c[0].mayBeInvalid || c[1].mayBeInvalid));
         return true;
     }
 
-    // The integer accumulator in the -fir form, IIR[, x, 0, 1] : y(n) = x(n) + y(n-1), the
+    // The integer accumulator as an IIR, IIR[x, 1] : y(n) = x(n) + y(n-1), the
     // time counter among them. An exact integer sum of a constant x in [xl, xh] lies in
     // [xl (t+1), xh (t+1)] at time t : the affine corridor the recursive form gets, read
     // over the horizon and capped at the int32 range past its wrap date (toItv).
     bool integerAccumulator(Tree sig, const std::vector<AffItv>& c, AffItv& result) const
     {
         int k;
-        if (c.size() != 4 || !isSigInt(sig->branch(3), &k) || k != 1) return false;
-        const AffItv& x = c[1];
+        if (c.size() != 2 || !isSigInt(sig->branch(1), &k) || k != 1) return false;
+        const AffItv& x = c[0];
         if (x.isEmpty() || !x.isConst() || x.lsb < 0 || !std::isfinite(x.a0) || !std::isfinite(x.b0)) {
             return false;
         }
@@ -1347,9 +1347,9 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
 
     AffItv iirBound(Tree sig, const std::vector<AffItv>& c) const
     {
-        const std::vector<AffItv> cs(c.begin() + 3, c.end());
-        const AffItv              gain = this->Iir(c[1], cs);
-        const AffItv              def  = iirDefinition(sig, c[1], cs);
+        const std::vector<AffItv> cs(c.begin() + 1, c.end());
+        const AffItv              gain = this->Iir(c[0], cs);
+        const AffItv              def  = iirDefinition(sig, c[0], cs);
         if (gain.isEmpty() || def.isEmpty()) return itv::aempty();
         const interval ig = itv::toItv(gain, fT), id = itv::toItv(def, fT);
         const bool     gb = ig.isBounded(), db = id.isBounded();

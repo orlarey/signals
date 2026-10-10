@@ -352,10 +352,10 @@ class Evaluator {
             }
             return s;
         }
-        if (isSigIIR(t, subs)) {  // IIR[Vi, x, c0, c1, ...] : y = x + sum_k c_(k+1) y(n-k), k >= 1
-            T s = r(at(subs[1], n));
-            for (size_t k = 3; k < subs.size(); k++) {
-                const int m = n - int(k - 2);
+        if (isSigIIR(t, subs)) {  // IIR[x, c1, ...] : y = x + sum_k c_k y(n-k), k >= 1
+            T s = r(at(subs[0], n));
+            for (size_t k = 1; k < subs.size(); k++) {
+                const int m = n - int(k);
                 s = s + r(at(subs[k], n)) * r(m < 0 ? 0 : at(t, m));
             }
             return s;
@@ -712,19 +712,15 @@ static void firForms()
     section("the forms of -fir");
     for (int precision : {1, 2}) {
         const std::string p = precision == 1 ? " (float)" : " (double)";
-        // a dummy recursive projection names the IIR's variable
-        Tree id = tree(unique("firvar"));
-        Tree vi = sigProj(0, ref(id));
-        rec(id, list1(sigInt(0)));
-        // the one-pole smoother IIR[Vi, (1 - a) A, 0, a], a written -1 and -1.0 on both sides
+        // the one-pole smoother IIR[(1 - a) A, a], a written -1 and -1.0 on both sides
         Tree sr   = slider("sr" + p, 48000, 50, 192000);
         Tree a    = sigExp(sigMul(sigInt(-1), sigDiv(sigReal(1000), sr)));
         Tree a2   = sigExp(sigMul(sigReal(-1.0), sigDiv(sigReal(1000), sr)));
         Tree A    = slider("freq" + p, 200, 200, 800);
-        Tree iir  = sigIIR({vi, sigMul(sigSub(one(), a2), A), sigInt(0), a});
+        Tree iir  = sigIIR({sigMul(sigSub(one(), a2), A), a});
         Tree inv  = sigDiv(sr, iir);
-        // the integer accumulator IIR[Vi, 1, 0, 1] and a table generated from it
-        Tree cnt  = sigIIR({vi, sigInt(1), sigInt(0), sigInt(1)});
+        // the integer accumulator IIR[1, 1] and a table generated from it
+        Tree cnt  = sigIIR({sigInt(1), sigInt(1)});
         Tree gen  = sigSin(sigMul(sigReal(2 * M_PI / 65536), sigFloatCast(sigSub(cnt, sigInt(1)))));
         Tree tbl  = sigRDTbl(sigWRTbl(sigInt(65536), sigGen(gen)), sigInt(100));
         // the impulse FIR[1, 1, -1] and an n-ary sum with a negation
@@ -865,11 +861,11 @@ static void kernels()
               "precision : sum of [0,1], 2, [-1,1] is [1, 4]" + p);
         inclusion("kernels", o, precision);
         // the nodes are the operations : a transformation keeps them, the tree algebra
-        // builds them with the layout of the reveal (IIR[nil, x, 0, C1, ...])
+        // builds them with their arguments as children (IIR[x, C1, ...])
         TransformAlgebra identity;
         check(signalTransform(o, identity) == o, "a transformation keeps sum, fir and iir" + p);
         check(fir == sigFIR({xp, sigReal(1.0), sigReal(0.0), sigReal(-2.0)}) &&
-                  smooth == sigIIR({nil(), xp, sigInt(0), sigReal(0.99)}) &&
+                  smooth == sigIIR({xp, sigReal(0.99)}) &&
                   sum == sigSum({xp, sigReal(2.0), xs}),
               "the kernel nodes are the operations of FaustAlgebra" + p);
     }

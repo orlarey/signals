@@ -387,9 +387,10 @@ SIGS_API bool isSigTemp(Tree s);
 SIGS_API bool isSigFIR(Tree s, Tree c0);  // true if s is a FIR on signal c0
 SIGS_API bool isSigFIR(Tree s, tvec& sigcoefs);
 
+// IIR[x, c1, ..., cn] : y(n) = x(n) + c1 y(n-1) + ... + cn y(n-n), the node reading its own past
 SIGS_API Tree sigIIR(const tvec& sigcoefs);
 SIGS_API bool isSigIIR(Tree s);
-SIGS_API bool isSigIIR(Tree s, Tree c0);  // true if s is a IIR on signal c0
+SIGS_API bool isSigIIR(Tree s, Tree c0);  // true if s is a IIR on input signal c0
 SIGS_API bool isSigIIR(Tree s, tvec& sigcoefs);
 
 SIGS_API Tree sigSum(const tvec& sigsubs);
