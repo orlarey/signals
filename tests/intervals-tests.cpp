@@ -319,6 +319,7 @@ class Evaluator {
             const T v = r(at(x, n));
             return v - round(v);
         }
+        if (isSigNeg(t, x)) return -r(at(x, n));
         if (isSigTpt(t, x)) {
             const T v = r(at(x, n));
             return v / (v + T(1));
@@ -845,6 +846,35 @@ static void kernels()
     }
 }
 
+static void negations()
+{
+    section("the negation neg");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        TreeAlgebra       B;
+        Tree              x   = slider("gx" + p, 1.5, 1, 2);
+        Tree              n   = sigNeg(x);
+        Tree              ix  = sigIntCast(slider("gi" + p, 3, 0, 9));
+        Tree              ni  = sigNeg(ix);
+        Tree              one = B.Mul(B.IntNum(-1), x), onei = B.Mul(B.IntNum(-1), ix);
+        itv::programPrecision() = precision;
+        typeAnnotation(outs({n, ni, one, onei}), false);
+        check(itvOf(n).lo() == -2 && itvOf(n).hi() == -1, "precision : neg of [1, 2] is [-2, -1]" + p);
+        bool same = true;
+        for (auto q : {std::make_pair(n, one), std::make_pair(ni, onei)}) {
+            Type t1 = getCertifiedSigType(q.first), t2 = getCertifiedSigType(q.second);
+            same    = same && t1->nature() == t2->nature() && t1->variability() == t2->variability() &&
+                   t1->computability() == t2->computability() &&
+                   t1->vectorability() == t2->vectorability() && t1->boolean() == t2->boolean();
+        }
+        check(same, "the exact attributes of neg(x) are those of -1 * x" + p);
+        TransformAlgebra identity;
+        check(signalTransform(outs({n, ni}), identity) == outs({n, ni}), "a transformation keeps neg" + p);
+        check(n->arity() == 1 && n->branch(0) == x && B.Neg(x) == n, "the child of neg is the argument of Neg" + p);
+        inclusion("negation", outs({n, ni}), precision);
+    }
+}
+
 static void invalidities()
 {
     section("what must stay invalid");
@@ -893,6 +923,7 @@ int main()
     firForms();
     nodes();
     kernels();
+    negations();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;

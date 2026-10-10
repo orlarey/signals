@@ -1189,6 +1189,16 @@ SIGS_API bool isSigMix(Tree s, Tree& c, Tree& a, Tree& b)
     return isTree(s, sigs::g.SIGMIX, c, a, b);
 }
 
+SIGS_API Tree sigNeg(Tree x)
+{
+    return tree(sigs::g.SIGNEG, x);
+}
+
+SIGS_API bool isSigNeg(Tree s, Tree& x)
+{
+    return isTree(s, sigs::g.SIGNEG, x);
+}
+
 SIGS_API Tree sigTpt(Tree x)
 {
     return tree(sigs::g.SIGTPT, x);

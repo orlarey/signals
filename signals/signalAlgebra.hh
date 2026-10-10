@@ -386,6 +386,7 @@ V SignalDispatch<V>::combine(Tree sig, const std::vector<V>& c,
             case sigs::SignalOpcode::Cfrac: return this->Cfrac(c[0]);
             case sigs::SignalOpcode::Mix: return this->Mix(c[0], c[1], c[2]);
             case sigs::SignalOpcode::Tpt: return this->Tpt(c[0]);
+            case sigs::SignalOpcode::Neg: return this->Neg(c[0]);
 
             case sigs::SignalOpcode::Count: break;  // not a constructor
         }

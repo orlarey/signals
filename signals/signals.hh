@@ -414,4 +414,12 @@ SIGS_API bool isSigMix(Tree s, Tree& c, Tree& a, Tree& b);
 SIGS_API Tree sigTpt(Tree x);
 SIGS_API bool isSigTpt(Tree s, Tree& x);
 
+/*****************************************************************************
+                             Negation
+    neg(x) = -x, the operation Neg of FaustAlgebra : the normal form writes a
+    negation with it, instead of a product by -1.
+*****************************************************************************/
+SIGS_API Tree sigNeg(Tree x);
+SIGS_API bool isSigNeg(Tree s, Tree& x);
+
 #endif

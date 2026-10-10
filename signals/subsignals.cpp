@@ -252,7 +252,7 @@ int getSubSignals(Tree sig, tvec& vsigs, bool visitgen)
     }
 
     // the compound operations : their arguments
-    else if (isSigFrac(sig, x) || isSigCfrac(sig, x) || isSigTpt(sig, x)) {
+    else if (isSigFrac(sig, x) || isSigCfrac(sig, x) || isSigTpt(sig, x) || isSigNeg(sig, x)) {
         vsigs.push_back(x);
         return 1;
     } else if (isSigMix(sig, c, x, y)) {

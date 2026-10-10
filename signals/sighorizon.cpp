@@ -125,6 +125,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         int    op;
         Tree   a, b;
         double k;
+        if (isSigNeg(t, x)) return true;
         if (!isSigBinOp(t, &op, a, b) || op != kMul) return false;
         if (constNum(a, k) && k == -1) {
             x = b;

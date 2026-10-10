@@ -82,6 +82,7 @@ enum class SignalOpcode : std::uint8_t {
     Cfrac,
     Mix,
     Tpt,
+    Neg,
     Count
 };
 
