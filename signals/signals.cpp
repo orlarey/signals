@@ -1211,6 +1211,17 @@ SIGS_API bool isSigMix(Tree s, Tree& c, Tree& a, Tree& b)
     return isTree(s, sigs::g.SIGMIX, c, a, b);
 }
 
+// phase(x, p) = (x % p) / p
+SIGS_API Tree sigPhase(Tree x, Tree p)
+{
+    return tree(sigs::g.SIGPHASE, x, p);
+}
+
+SIGS_API bool isSigPhase(Tree s, Tree& x, Tree& p)
+{
+    return isTree(s, sigs::g.SIGPHASE, x, p);
+}
+
 SIGS_API Tree sigNeg(Tree x)
 {
     return tree(sigs::g.SIGNEG, x);

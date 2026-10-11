@@ -84,6 +84,7 @@ enum class SignalOpcode : std::uint8_t {
     Tpt,
     Neg,
     Prod,
+    Phase,
     Count
 };
 

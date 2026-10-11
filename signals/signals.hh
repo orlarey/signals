@@ -415,6 +415,8 @@ SIGS_API Tree sigCfrac(Tree x);
 SIGS_API bool isSigCfrac(Tree s, Tree& x);
 SIGS_API Tree sigMix(Tree c, Tree a, Tree b);
 SIGS_API bool isSigMix(Tree s, Tree& c, Tree& a, Tree& b);
+SIGS_API Tree sigPhase(Tree x, Tree p);
+SIGS_API bool isSigPhase(Tree s, Tree& x, Tree& p);
 SIGS_API Tree sigTpt(Tree x);
 SIGS_API bool isSigTpt(Tree s, Tree& x);
 

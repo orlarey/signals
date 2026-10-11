@@ -320,6 +320,16 @@ class Evaluator {
             return v - round(v);
         }
         if (isSigNeg(t, x)) return -r(at(x, n));
+        if (isSigPhase(t, x, y)) {
+            // the remainder of two integers in int32 (C semantics), fmod otherwise ; the
+            // division in the precision of the program
+            const double a = at(x, n), b = at(y, n);
+            if (isInt(x) && isInt(y)) {
+                const int32_t q = int32_t(b), m = (q == 0) ? 0 : int32_t(a) % q;
+                return T(m) / T(q);
+            }
+            return T(std::fmod(r(a), r(b))) / r(b);
+        }
         if (isSigTpt(t, x)) {
             const T v = r(at(x, n));
             return v / (v + T(1));
@@ -967,6 +977,31 @@ static void costs()
     check(secs < 5, "cost : a chain of 1000 sums is typed in " + std::to_string(secs) + " s");
 }
 
+static void phases()
+{
+    section("the compound node phase");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        // ba.period(P) / P : P = int(sr / 10) of a variable rate, W = (W' + 1) % P
+        Tree P   = sigIntCast(sigMul(slider("psr" + p, 48000, 50, 192000), sigReal(0.1)));
+        Tree w   = rec1("pcount" + p, [&](Tree y) { return sigRem(sigAdd(y, sigInt(1)), P); });
+        Tree x   = sigAdd(late(w), sigInt(1));
+        Tree ph  = sigPhase(x, P);
+        Tree def = sigDiv(sigFloatCast(w), sigFloatCast(P));
+        Tree o   = outs({ph, def});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        check(itvOf(ph).lo() >= 0 && itvOf(ph).hi() <= 1 && itvOf(ph).isValid(),
+              "precision : phase(W' + 1, P) of a counter lies in [0, 1]" + p);
+        check(itvOf(def).hi() > 1000, "precision : W / P read as two values does not" + p);
+        inclusion("phase", o, precision);
+        // a transformation rebuilds the node as such (outside of a recursion, which it renames)
+        Tree             flat = sigPhase(sigIntCast(slider("px" + p, 3, 0, 1000)), P);
+        TransformAlgebra identity;
+        check(signalTransform(flat, identity) == flat, "a transformation keeps phase" + p);
+    }
+}
+
 int main()
 {
     tlib::init();
@@ -980,6 +1015,7 @@ int main()
     rotations();
     firForms();
     nodes();
+    phases();
     kernels();
     negations();
     products();

@@ -166,6 +166,7 @@ class NatureAlgebra : public SignalAlgebra<int> {
     int Frac(const int& x) const override { return x | kReal; }
     int Cfrac(const int& x) const override { return x | kReal; }
     int Mix(const int& c, const int& a, const int& b) const override { return kReal | c | a | b; }
+    int Phase(const int& x, const int& p) const override { return kReal | x | p; }
     int Tpt(const int&) const override { return kReal; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
@@ -331,6 +332,7 @@ class VariabilityAlgebra : public SignalAlgebra<int> {
     int Frac(const int& x) const override { return x; }
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kKonst | c | a | b; }
+    int Phase(const int& x, const int& p) const override { return kKonst | x | p; }
     int Tpt(const int& x) const override { return x | kKonst; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
@@ -490,6 +492,7 @@ class ComputabilityAlgebra : public SignalAlgebra<int> {
     int Frac(const int& x) const override { return x; }
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kComp | c | a | b; }
+    int Phase(const int& x, const int& p) const override { return kComp | x | p; }
     int Tpt(const int& x) const override { return x | kComp; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
@@ -653,6 +656,7 @@ class VectorabilityAlgebra : public SignalAlgebra<int> {
     int Frac(const int& x) const override { return x; }
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kVect | c | a | b; }
+    int Phase(const int& x, const int& p) const override { return kVect | x | p; }
     int Tpt(const int& x) const override { return x | kVect; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }
@@ -809,6 +813,7 @@ class BooleanAlgebra : public SignalAlgebra<int> {
     int Frac(const int& x) const override { return x; }
     int Cfrac(const int& x) const override { return x; }
     int Mix(const int& c, const int& a, const int& b) const override { return kNum | c | a | b; }
+    int Phase(const int& x, const int& p) const override { return kNum | x | p; }
     int Tpt(const int& x) const override { return x | kNum; }
     // the kernels : their definitions (exact for this attribute, see SignalDispatch)
     int Sum(const std::vector<int>& t) const override { return sumDefinition(t); }

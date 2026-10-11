@@ -304,6 +304,8 @@ ostream& ppsig::print(ostream& fout) const
         printfun(fout, "mix", sel, x, y);
     } else if (isSigTpt(fSig, x)) {
         printfun(fout, "tpt", x);
+    } else if (isSigPhase(fSig, x, y)) {
+        printfun(fout, "phase", x, y);
     } else if (isSigNeg(fSig, x)) {
         printfun(fout, "neg", x);
     }
@@ -612,6 +614,8 @@ ostream& ppsigShared::print(ostream& fout) const
         SIG_INSERT_ID(printfun(s, "mix", sel, x, y));
     } else if (isSigTpt(fSig, x)) {
         SIG_INSERT_ID(printfun(s, "tpt", x));
+    } else if (isSigPhase(fSig, x, y)) {
+        SIG_INSERT_ID(printfun(s, "phase", x, y));
     } else if (isSigNeg(fSig, x)) {
         SIG_INSERT_ID(printfun(s, "neg", x));
     }

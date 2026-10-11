@@ -190,6 +190,7 @@ class SIGS_API TreeAlgebra : public SignalDispatch<Tree> {
         return tree(sigs::g.SIGMIX, c, a, b);
     }
     Tree Tpt(const Tree& x) const override { return tree(sigs::g.SIGTPT, x); }
+    Tree Phase(const Tree& x, const Tree& p) const override { return tree(sigs::g.SIGPHASE, x, p); }
     // the kernels stay nodes, their children the arguments of their operations :
     // FIR[x, c0, ...], IIR[x, c1, ...], Sum[t0, ...], Prod[f0, ...]
     Tree Sum(const std::vector<Tree>& t) const override { return tree(sigs::g.SIGSUM, t); }

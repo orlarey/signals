@@ -798,6 +798,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
                                    isSigFloatCast(t, x) || isSigSelect2(t, x, y, z) ||
                                    isSigSum(t) || isSigNeg(t, x) || isSigFrac(t, x) ||
                                    isSigCfrac(t, x) || isSigTpt(t, x) || isSigMix(t, x, y, w) ||
+                                   isSigPhase(t, x, y) ||
                                    getUserData(t) != nullptr;
         if (instantaneous) {
             for (int j = 0; j < t->arity() && !r; j++) r = readsRefined(t->branch(j), keys, memo);

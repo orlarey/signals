@@ -269,6 +269,7 @@ class SIGS_API TransformAlgebra : public SignalDispatch<XSig> {
         return o(fBuild.Mix(c.out, a.out, b.out));
     }
     XSig Tpt(const XSig& x) const override { return o(fBuild.Tpt(x.out)); }
+    XSig Phase(const XSig& x, const XSig& p) const override { return o(fBuild.Phase(x.out, p.out)); }
     XSig Sum(const std::vector<XSig>& t) const override { return o(fBuild.Sum(outs(t))); }
     XSig Prod(const std::vector<XSig>& t) const override { return o(fBuild.Prod(outs(t))); }
     XSig Fir(const XSig& x, const std::vector<XSig>& c) const override
