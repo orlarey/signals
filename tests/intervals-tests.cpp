@@ -335,8 +335,12 @@ class Evaluator {
             return v / (v + T(1));
         }
         if (isSigMix(t, x, y, z)) {
-            // the program computes the interpolation a + c * (b - a)
+            // the program interpolates from the operand whose weight may be near 1
             const T c = r(at(x, n)), a = r(at(y, n)), b = r(at(z, n));
+            if (itv::mixFromB(getCertifiedSigType(x)->getInterval())) {
+                const T w = T(1) - c;
+                return fRun.fma ? std::fma(w, a - b, b) : b + w * (a - b);
+            }
             return fRun.fma ? std::fma(c, b - a, a) : a + c * (b - a);
         }
         if (isSigIntCast(t, x)) return toInt(t, at(x, n));
