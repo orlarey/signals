@@ -886,6 +886,36 @@ static void kernels()
     }
 }
 
+static void counters()
+{
+    section("the counters, computed as the program computes them");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        TreeAlgebra       B;
+        Tree              g   = slider("cg" + p, 1, 0, 1);
+        Tree              xs  = slider("cx" + p, 0, -1, 1);
+        Tree              cnt = B.Iir(sigReal(1.0), {g});
+        Tree              two = B.Iir(sigReal(2.0), {g});
+        Tree              acc = B.Iir(xs, {sigReal(1.0)});
+        Tree              o   = outs({cnt, two, acc});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        if (precision == 1) {
+            // y = 1 + g * y@1 stops growing at 2^24, where 2^24 + 1 rounds to 2^24
+            check(itvOf(cnt).isValid() && itvOf(cnt).lo() >= 0 && itvOf(cnt).hi() == 16777216,
+                  "precision : a counter is bounded by 2^24" + p);
+            // 2^24 + 2 is a float : y = 2 + g * y@1 passes 2^24, and stops at 2^28 on the ladder
+            check(itvOf(two).isValid() && itvOf(two).hi() > 16777216 && itvOf(two).hi() <= 268435456,
+                  "precision : a counter by 2 passes 2^24" + p);
+            check(itvOf(acc).isValid() && itvOf(acc).lo() >= -16777216 && itvOf(acc).hi() <= 16777216,
+                  "precision : an accumulator of [-1, 1] is bounded by 2^24" + p);
+        } else {
+            check(itvOf(cnt).isValid() && itvOf(cnt).hi() > 16777216, "precision : a counter passes 2^24" + p);
+        }
+        inclusion("counters", o, precision);
+    }
+}
+
 static void negations()
 {
     section("the negation neg");
@@ -1022,6 +1052,7 @@ int main()
     nodes();
     phases();
     kernels();
+    counters();
     negations();
     products();
     invalidities();

@@ -1297,6 +1297,79 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     // the fixpoint of a recursive group (probe, ascending Kleene with widening,
     // narrowing), gives the bound the recursion had before the reveal. Both enclose the
     // values of the program : so does their intersection, never worse than either.
+    // The bound of a one-tap IIR y = x + c * y@k computed as the program computes it : the
+    // product and the sum rounded to nearest in the program's precision, plain or fused.
+    // Rounding to nearest is nondecreasing, so the largest value the program can compute
+    // for x, c and y@k in their intervals is its own computation at a corner (the largest
+    // x, the largest product of the corners of c and y@k), and the smallest at the opposite
+    // one : no rounding margin. c and y@k are values the program stores (y@k reads y, or 0
+    // before the first samples) : their bounds are taken inward, on the floating grid. x
+    // may be an exact product fused into the sum : its bounds are taken outward. The
+    // one-tap filter is computed the same way by every form of the generators. Empty when
+    // it does not apply (not float nor double, an operand unbounded or possibly invalid,
+    // several taps).
+    AffItv iirCorner(const AffItv& x, const std::vector<AffItv>& cs, const AffItv& seed) const
+    {
+        const int prec = itv::programPrecision();
+        if (prec != 1 && prec != 2) return itv::aempty();
+        int tap = -1;
+        for (size_t k = 0; k < cs.size(); k++) {
+            const AffItv& ck = cs[k];
+            if (ck.isConst() && ck.a0 == 0 && ck.b0 == 0 && !ck.mayBeInvalid) continue;
+            if (tap >= 0) return itv::aempty();
+            tap = int(k);
+        }
+        if (tap < 0 || x.mayBeInvalid || cs[tap].mayBeInvalid || seed.mayBeInvalid) return itv::aempty();
+        const interval ix = itv::toItv(x, fT), ic = itv::toItv(cs[tap], fT), iy = itv::toItv(seed, fT);
+        if (!ix.isBounded() || !ic.isBounded() || !iy.isBounded() || ix.isEmpty() || ic.isEmpty() || iy.isEmpty()) {
+            return itv::aempty();
+        }
+        // a program value v <= b is at most the largest program value <= b (and symmetrically)
+        auto down = [prec](double b) {
+            if (prec == 2) return b;
+            const float f = float(b);
+            return double(double(f) > b ? std::nextafter(f, -HUGE_VALF) : f);
+        };
+        auto up = [prec](double b) {
+            if (prec == 2) return b;
+            const float f = float(b);
+            return double(double(f) < b ? std::nextafter(f, HUGE_VALF) : f);
+        };
+        // acc + c * y as the program computes it, plain and fused
+        auto plain = [prec](double acc, double c, double y) {
+            if (prec == 2) {
+                volatile double p = c * y;
+                volatile double r = acc + p;
+                return double(r);
+            }
+            volatile float p = float(c) * float(y);
+            volatile float r = float(acc) + p;
+            return double(r);
+        };
+        auto fused = [prec](double acc, double c, double y) {
+            return prec == 2 ? std::fma(c, y, acc) : double(std::fmaf(float(c), float(y), float(acc)));
+        };
+        const double ylo = std::min(iy.lo(), 0.0), yhi = std::max(iy.hi(), 0.0);
+        const double xs[2] = {down(ix.lo()), up(ix.hi())};
+        const double cv[2] = {up(ic.lo()), down(ic.hi())};
+        const double yv[2] = {up(ylo), down(yhi)};
+        if (xs[0] > xs[1] || cv[0] > cv[1] || yv[0] > yv[1]) return itv::aempty();
+        double lo = HUGE_VAL, hi = -HUGE_VAL;
+        for (double c : cv) {
+            for (double y : yv) {
+                for (int s = 0; s < 2; s++) {
+                    const double acc = xs[s];
+                    for (double r : {plain(acc, c, y), fused(acc, c, y)}) {
+                        if (s == 0) lo = std::min(lo, r);
+                        if (s == 1) hi = std::max(hi, r);
+                    }
+                }
+            }
+        }
+        if (!std::isfinite(lo) || !std::isfinite(hi)) return itv::aempty();
+        return itv::fromItv(interval(lo, hi, std::min({ix.lsb(), ic.lsb(), iy.lsb()})));
+    }
+
     AffItv iirDefinition(Tree sig, const AffItv& x, const std::vector<AffItv>& cs) const
     {
         auto step = [&](const AffItv& y) {
@@ -1314,6 +1387,25 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         AffItv probed    = bottom(sig);
         for (const AffItv& s : probeSeeds(sig)) {
             const AffItv f = step(s);
+            // the computation of the program at the corners, when the margins of the
+            // interval operations exceed what the recursion takes back (a counter that
+            // stops growing in float at 2^24, a smoother whose pole is a few ulps below 1) :
+            // an invariant, narrowed by the same computation, is the bound
+            if (!lessEqual(f, s)) {
+                const AffItv g = iirCorner(x, cs, s);
+                if (!g.isEmpty() && lessEqual(g, s)) {
+                    AffItv inv = g;
+                    for (int n = 0; n < maxNarrowingIterations(); n++) {
+                        const AffItv h = iirCorner(x, cs, inv);
+                        if (h.isEmpty()) break;
+                        const bool d = converged(inv, h);
+                        inv          = h;
+                        if (d) break;
+                    }
+                    recordProbe(sig, inv, true);
+                    return inv;
+                }
+            }
             if (lessEqual(f, s)) {
                 certified = true;
                 probed    = f;
