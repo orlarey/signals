@@ -303,9 +303,8 @@ int main()
     check(ts->getInterval().lo() == 0.0 && ts->getInterval().hi() == 1.0,
           "interval: slider in [0, 1]");
 
-    // input + 0.5 is [-0.5, 1.5], times slider [0, 1] -> product in [-0.5, 1.5]
-    check(t->getInterval().lo() >= -0.5 && t->getInterval().hi() <= 1.5,
-          "interval: product bounded by [-0.5, 1.5]");
+    // an audio input has no assumed range : input + 0.5, times slider [0, 1], is not bounded
+    check(!t->getInterval().isBounded(), "interval: input * slider is not bounded (no range assumed for an input)");
 
     // --- integer signals ----------------------------------------------------
     Tree n = sigAdd(sigInt(1), sigInt(2));
