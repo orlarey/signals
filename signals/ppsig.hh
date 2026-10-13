@@ -168,7 +168,11 @@ class ppsigNames {
 // are printed last. The members of a recursive group are defined on consecutive lines. Names
 // are numbered in the order of a depth-first traversal from the outputs, left to right, so
 // the text depends only on the signal. When all is set, every compound subexpression is
-// named, not only the shared ones.
+// named, not only the shared ones. An equation whose node carries a type is followed by
+// it, as a comment : its nature, variability, interval, lsb, and validity. When the
+// signal is typed, a node also has an equation of its own where its typing goes wrong :
+// a delay whose amount has no valid bounds, which the compiler refuses, and a node whose
+// interval becomes invalid or unbounded while its operands are not.
 class ppsigEquations {
    public:
     // computes the names of L, then prints its equations
@@ -192,6 +196,9 @@ class ppsigEquations {
         int  fMember;
     };
     std::vector<Equation>    fLines;    ///< the equations, in the order of definition
+    std::map<std::pair<Tree, int>, Tree> fProjs;  ///< (group, member) -> its projection
+    mutable std::map<Tree, std::string>  fProblems;  ///< node -> what its typing shows wrong
+    mutable std::map<std::pair<Tree, Tree>, bool> fReaches;  ///< (node, group) -> reads it
     Tree                     fRoot;
     int                      fNextGroup  = 0;
     int                      fNextShared = 0;
@@ -206,6 +213,9 @@ class ppsigEquations {
                             const std::map<Tree, int>& firstMember, std::set<Tree>& seen,
                             std::set<int>& deps) const;
     void        order();
+    std::string problemOf(Tree t) const;
+    std::string groupProblem(Tree group, Tree member) const;
+    bool        reaches(Tree t, Tree group) const;
     std::string expand(Tree t) const;
 };
 

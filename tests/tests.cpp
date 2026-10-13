@@ -270,18 +270,30 @@ static void checkNatureFixpoint()
 
     // The equations : the members of a recursive group named R0.0, R0.1 and defined on
     // consecutive lines, a shared subexpression named and defined once, before its uses.
+    // The group is fresh, so that no type is printed.
     {
-        Tree shared = sigMul(recC1, sigInt(3));
-        Tree sum    = sigAdd(shared, recC0);
+        Tree idE   = tree(unique("E"));
+        Tree refE  = ref(idE);
+        Tree e0    = sigAdd(sigInt(1), sigDelay1(sigProj(0, refE)));
+        Tree e1    = sigAdd(sigMul(sigReal(0.5), sigProj(0, refE)), sigDelay1(sigProj(1, refE)));
+        Tree grpE  = rec(idE, list2(e0, e1));
+        Tree shared = sigMul(sigProj(1, grpE), sigInt(3));
+        Tree sum    = sigAdd(shared, sigProj(0, grpE));
         Tree diff   = sigSub(shared, sigInput(0));
-        Tree L      = list2(sum, diff);
         std::ostringstream eqs;
-        ppsigEquations(L, eqs);
+        ppsigEquations(list2(sum, diff), eqs);
         check(eqs.str() ==
                   "R0.0 = 1+R0.0';\n"
                   "R0.1 = 0.5*R0.0+R0.1';\n"
                   "E0   = R0.1*3;\n"
-                  "process = (E0+R0.0, E0-IN[0]);\n", "equations: groups and shared subexpressions named once");
+                  "process = (E0+R0.0, E0-IN[0]);\n",
+              "equations: groups and shared subexpressions named once");
+
+        // a typed signal prints its type after its equation
+        std::ostringstream typed;
+        ppsigEquations(list1(recM), typed);
+        check(typed.str().find("// int samp [0, 1999] lsb 0") != std::string::npos,
+              "equations: a typed recursion prints its type: " + typed.str());
     }
 }
 

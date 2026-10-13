@@ -21,11 +21,14 @@
 
 #include "ppsig.hh"
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <vector>
 #include "sigs-config.hh"
 #include "binop.hh"
 #include "tlib-error.hh"
 #include "sigs-state.hh"
+#include "sigtyperules.hh"
 #include "prim2.hh"
 #include "recursivness.hh"
 #include "xtended.hh"
@@ -802,6 +805,67 @@ bool ppsigNames::groupName(Tree group, std::string& name) const
     return true;
 }
 
+// a number with the fewest significant digits that read back to it, as a single float
+// when it is one
+static std::string shortest(double x)
+{
+    if (std::isinf(x)) {
+        return (x < 0) ? "-inf" : "inf";
+    }
+    if (std::abs(x) < 9007199254740992.0 && x == std::floor(x)) {
+        std::ostringstream str;
+        str << (long long)x;
+        return str.str();
+    }
+    if (double(float(x)) == x) {
+        for (int digits = 6; digits <= 9; digits++) {
+            std::ostringstream str;
+            str.precision(digits);
+            str << x;
+            if (std::strtof(str.str().c_str(), nullptr) == float(x)) {
+                return str.str();
+            }
+        }
+    }
+    for (int digits = 6; digits <= 17; digits++) {
+        std::ostringstream str;
+        str.precision(digits);
+        str << x;
+        if (std::strtod(str.str().c_str(), nullptr) == x) {
+            return str.str();
+        }
+    }
+    std::ostringstream str;
+    str.precision(17);
+    str << x;
+    return str.str();
+}
+
+// the type of a signal as a comment : nature, variability, interval, lsb, validity
+// (the booleanity of the typing, an upper bound joined over operands, is left out)
+static std::string typeComment(Type t)
+{
+    std::ostringstream str;
+    str << "// "
+        << ((t->nature() == kInt) ? "int" : "real") << ' '
+        << ((t->variability() == kKonst) ? "konst"
+            : (t->variability() == kBlock) ? "block"
+                                           : "samp");
+    const interval& i = t->getInterval();
+    if (i.isEmpty()) {
+        str << " []";
+    } else {
+        str << " [" << shortest(i.lo()) << ", " << shortest(i.hi()) << "]";
+        if (i.isBounded()) {
+            str << " lsb " << i.lsb();
+        }
+    }
+    if (i.mayBeInvalid()) {
+        str << " invalid";
+    }
+    return str.str();
+}
+
 // x@0, which is printed as x
 static bool isDelay0(Tree t, Tree& x)
 {
@@ -896,10 +960,149 @@ std::string ppsigEquations::expand(Tree t) const
 }
 
 // whether t is defined by an equation of its own
+// whether the interval of a type is invalid, or unbounded
+static bool isInvalidType(Type t)
+{
+    return t && t->getInterval().mayBeInvalid();
+}
+
+static bool isUnboundedType(Type t)
+{
+    return t && !t->getInterval().isEmpty() && !t->getInterval().isBounded();
+}
+
+// what the typing of t shows wrong, if anything : a delay the compiler refuses (its amount
+// has no valid bounds, or may be negative), or the birth of an invalid or unbounded
+// interval, from operands that are not
+std::string ppsigEquations::problemOf(Tree t) const
+{
+    auto memo = fProblems.find(t);
+    if (memo != fProblems.end()) {
+        return memo->second;
+    }
+    std::string problem;
+    Type        ty = getSigType(t);
+    Tree        x, d;
+    int         i;
+    if (ty && !isLeafSig(t) && !isProj(t, &i, x)) {
+        Type td = nullptr;
+        if (isSigDelay(t, x, d) && !isSigInt(d, &i)) {
+            td = getSigType(d);
+        }
+        if (td && (!td->getInterval().isValid() || !td->getInterval().isBounded())) {
+            problem = "REFUSED : delay amount " + td->getInterval().to_string();
+        } else if (td && td->getInterval().lo() < 0) {
+            problem = "REFUSED : delay amount may be negative " + td->getInterval().to_string();
+        } else if (isInvalidType(ty) || isUnboundedType(ty)) {
+            bool              opInvalid = false, opUnbounded = false;
+            std::vector<Tree> subs;
+            subsignals(t, subs);
+            for (Tree s : subs) {
+                Type ts = getSigType(s);
+                opInvalid |= isInvalidType(ts);
+                opUnbounded |= isUnboundedType(ts);
+            }
+            if (isInvalidType(ty) && !opInvalid) {
+                // born from valid operands : from bounded ones, it is a cause ; from unbounded
+                // ones (inf-inf, 0*inf), a consequence of the unbounded interval above
+                problem = opUnbounded ? "invalid from unbounded operands" : "invalid from here";
+            } else if (isUnboundedType(ty) && !opUnbounded) {
+                problem = "unbounded from here";
+            }
+        }
+    }
+    fProblems[t] = problem;
+    return problem;
+}
+
+// whether t reads a member of group at the current or a past sample
+bool ppsigEquations::reaches(Tree t, Tree group) const
+{
+    auto key  = std::make_pair(t, group);
+    auto memo = fReaches.find(key);
+    if (memo != fReaches.end()) {
+        return memo->second;
+    }
+    fReaches[key] = false;  // a cycle through another group does not reach it
+    int  i;
+    Tree g;
+    bool result = false;
+    if (isProj(t, &i, g) && g == group) {
+        result = true;
+    } else {
+        std::vector<Tree> subs;
+        subsignals(t, subs);
+        for (Tree s : subs) {
+            if (reaches(s, group)) {
+                result = true;
+                break;
+            }
+        }
+    }
+    fReaches[key] = result;
+    return result;
+}
+
+// the problem of a member of a recursive group : its interval is invalid or unbounded
+// while every value the group reads from outside itself is not -- the recursion is where
+// it is born
+std::string ppsigEquations::groupProblem(Tree group, Tree member) const
+{
+    Type ty = getSigType(member);
+    if (!isInvalidType(ty) && !isUnboundedType(ty)) {
+        return "";
+    }
+    Tree var, le;
+    if (!isRec(group, var, le)) {
+        return "";
+    }
+    bool              outInvalid = false, outUnbounded = false;
+    std::set<Tree>    seen;
+    std::vector<Tree> work;
+    for (; isList(le); le = tl(le)) {
+        work.push_back(hd(le));
+    }
+    while (!work.empty()) {
+        Tree t = work.back();
+        work.pop_back();
+        if (!seen.insert(t).second) {
+            continue;
+        }
+        if (!reaches(t, group)) {
+            outInvalid |= isInvalidType(getSigType(t));
+            outUnbounded |= isUnboundedType(getSigType(t));
+            continue;
+        }
+        int  i;
+        Tree g;
+        if (isProj(t, &i, g) && g == group) {
+            continue;
+        }
+        std::vector<Tree> subs;
+        subsignals(t, subs);
+        for (Tree s : subs) {
+            work.push_back(s);
+        }
+    }
+    if (isInvalidType(ty) && !outInvalid) {
+        return outUnbounded ? "invalid from unbounded operands (the recursion)"
+                            : "invalid from here (the recursion)";
+    }
+    if (isUnboundedType(ty) && !outUnbounded) {
+        return "unbounded from here (the recursion)";
+    }
+    return "";
+}
+
 bool ppsigEquations::isNamed(Tree t) const
 {
     if (isAtomicSig(t)) {
         return false;
+    }
+    // a cause gets an equation of its own ; a consequence is noted only on an equation
+    std::string problem = problemOf(t);
+    if (!problem.empty() && problem != "invalid from unbounded operands") {
+        return true;
     }
     if (fAll) {
         // a negation used once is printed by its sum as a subtraction
@@ -938,6 +1141,7 @@ void ppsigEquations::define(Tree t)
         return;
     }
     if (isProj(t, &i, group) && isRec(group, var, le)) {
+        fProjs[std::make_pair(group, i)] = t;
         defineGroup(group);
         return;
     }
@@ -1229,26 +1433,86 @@ ppsigEquations::ppsigEquations(Tree L, std::ostream& fout, bool all) : ppsigEqua
 
 void ppsigEquations::print(std::ostream& fout) const
 {
-    std::vector<std::pair<std::string, std::string>> lines;
-    size_t                                           width = 0;
+    struct Line {
+        std::string name, text, type;
+    };
+    std::vector<Line> lines;
+    size_t            width = 0;
+    std::set<Tree>    marked;
     for (const Equation& e : fLines) {
-        std::string name;
+        Line line;
+        Tree typed = e.fNode;
         if (e.fGroup == nullptr) {
-            name = fNames.fShared.at(e.fNode);
+            line.name = fNames.fShared.at(e.fNode);
         } else {
             const std::pair<int, int>& g = fNames.fGroups.at(e.fGroup);
-            name = "R" + std::to_string(g.first);
+            line.name = "R" + std::to_string(g.first);
             if (g.second > 1) {
-                name += "." + std::to_string(e.fMember);
+                line.name += "." + std::to_string(e.fMember);
+            }
+            auto p = fProjs.find(std::make_pair(e.fGroup, e.fMember));
+            if (p != fProjs.end()) {
+                typed = p->second;
             }
         }
-        width = std::max(width, name.size());
-        lines.push_back(std::make_pair(name, expand(e.fNode)));
+        line.text = expand(e.fNode) + ";";
+        Type t    = getSigType(typed);
+        if (t) {
+            line.type = typeComment(t);
+            // the problem of a group is shown once, on its first member
+            std::string problem;
+            if (e.fGroup == nullptr) {
+                problem = problemOf(e.fNode);
+            } else if (marked.insert(e.fGroup).second) {
+                problem = groupProblem(e.fGroup, typed);
+            }
+            if (!problem.empty()) {
+                line.type += "  <-- " + problem;
+            }
+        }
+        width = std::max(width, line.name.size());
+        lines.push_back(line);
     }
-    // the equal signs aligned
-    for (const auto& line : lines) {
-        fout << line.first << std::string(width - line.first.size(), ' ') << " = " << line.second
-             << ";\n";
+
+    // the outputs, with their types
+    Line out;
+    out.name = "process";
+    out.text = expand(fRoot) + ";";
+    std::string sep;
+    for (Tree l = fRoot; isList(l); l = tl(l)) {
+        Type t = getSigType(hd(l));
+        if (!t) {
+            out.type.clear();
+            break;
+        }
+        out.type += sep + typeComment(t).substr(sep.empty() ? 0 : 3);
+        sep = " ; ";
     }
-    fout << "process = " << expand(fRoot) << ";" << std::endl;
+
+    // the equal signs aligned, and the types in a column when the lines are short enough
+    const size_t maxColumn = 100;
+    size_t       column    = 0;
+    for (const Line& line : lines) {
+        size_t len = width + 3 + line.text.size();
+        if (len <= maxColumn) {
+            column = std::max(column, len);
+        }
+    }
+    // a type follows its equation in the column, or comes before a line too long for it
+    auto printLine = [&](const std::string& head, const Line& line) {
+        std::string text = head + line.text;
+        if (line.type.empty()) {
+            fout << text << "\n";
+        } else if (text.size() > maxColumn) {
+            fout << line.type << "\n" << text << "\n";
+        } else {
+            fout << text << std::string((text.size() < column) ? column - text.size() : 0, ' ')
+                 << "  " << line.type << "\n";
+        }
+    };
+    for (const Line& line : lines) {
+        printLine(line.name + std::string(width - line.name.size(), ' ') + " = ", line);
+    }
+    printLine("process = ", out);
+    fout << std::flush;
 }
