@@ -68,6 +68,8 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     };
     mutable std::unordered_map<Tree, Extrapolation> fExtrapolation;
 
+    /// The content of the tables generated at init, analysed apart (tableContent)
+    mutable std::unordered_map<Tree, AffItv> fTableContent;
     /// Memos of the cheap filters of the sum rules (hasRoundingTerm, hasComplementTerm) :
     /// flattening every node of a long sum chain would be quadratic.
     mutable std::unordered_map<Tree, bool> fHasRoundingTerm, fHasComplementTerm;
@@ -1265,6 +1267,16 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         if (isSigIIR(sig)) return iirBound(sig, c);
         if (isSum(sig) && hasRoundingTerm(sig) && fractionalSum(sig, ev, r)) return r;
         if (isSum(sig) && hasComplementTerm(sig) && mixSum(sig, ev, r)) return r;
+        // A table generated at init : its content is the generator over n samples
+        {
+            Tree size, gen, wi, ws, content;
+            int  n;
+            if (isSigWRTbl(sig, size, gen, wi, ws) && isSigGen(gen, content) && !isSigWaveform(content) &&
+                isSigInt(size, &n) && c.size() == 4) {
+                const AffItv g = tableContent(sig, content, n);
+                if (!g.isEmpty()) return this->WRTbl(c[0], g, c[2], c[3]);
+            }
+        }
         // A table read : the library cannot certify it (the table extent is not part
         // of the value), the compiler can. Promotion clamps every index it does not
         // prove within [0, size-1] by exact integer reasoning (sigPromotion), so the
@@ -1370,6 +1382,36 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     explicit HorizonAlgebra(bool defaultParams = false)
         : itv::AffineOps<SignalAlgebra<AffItv>>(horizonFromEnv(), defaultParams)
     {
+    }
+
+    /// The same analysis over a horizon of the given number of samples
+    HorizonAlgebra(double horizon, bool defaultParams)
+        : itv::AffineOps<SignalAlgebra<AffItv>>(horizon, defaultParams)
+    {
+    }
+
+    /// The content of a table of n elements filled at init by the generator gen : the
+    /// generator runs n samples from its own initial state (it is compiled apart, with its
+    /// own recursions), so its values are those of a separate analysis over its samples 0
+    /// to n - 1 (the horizon is the last sample), collapsed to one constant interval. A generator shares its nodes with the
+    /// program (the time counter IIR[1, 1] is one node) : the separate analysis keeps their
+    /// intervals over the program's horizon as they are. Empty when it does not apply.
+    AffItv tableContent(Tree table, Tree gen, int n) const
+    {
+        auto it = fTableContent.find(table);
+        if (it != fTableContent.end()) return it->second;
+        AffItv r = itv::aempty();
+        if (n > 0 && double(n - 1) < fT) {
+            HorizonAlgebra           sub(double(n - 1), fDefaults);
+            FixPointIterator<AffItv> iter(getRecPlan(gen), sub);
+            const AffItv             g = iter.value(gen);
+            if (!g.isEmpty()) {
+                r              = itv::fromItv(itv::toItv(g, double(n - 1)));
+                r.mayBeInvalid = g.mayBeInvalid;
+            }
+        }
+        fTableContent[table] = r;
+        return r;
     }
 
     //--- the lattice ------------------------------------------------------------------
