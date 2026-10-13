@@ -916,6 +916,36 @@ static void counters()
     }
 }
 
+static void accumulators()
+{
+    section("the accumulators, their sums rounded as the program rounds them");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        Tree t  = slider("at" + p, 0, 0, 1);
+        Tree d  = slider("ad" + p, 0.5, 0, 1);
+        Tree dn = slider("an" + p, 0.5, -100000, 1);
+        // y = d + select2(t > 1/2, y@1, 1) : a sum, not a filter
+        Tree up  = rec1("acc" + p, [&](Tree yy) { return sigAdd(d, sigSelect2(sigGT(t, sigReal(0.5)), yy, sigReal(1.0))); });
+        // the same with a decrement that may be large : no lower bound, a max gives one
+        Tree two = rec1("acn" + p, [&](Tree yy) { return sigAdd(dn, sigSelect2(sigGT(t, sigReal(0.5)), yy, sigReal(1.0))); });
+        Tree lo  = sigMax(two, sigReal(1.5));
+        Tree o   = outs({up, lo});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        if (precision == 1) {
+            // 2^24 + d rounds to 2^24 for d in [0, 1] : the seed [0, 2^24] maps into itself
+            check(itvOf(up).isValid() && itvOf(up).lo() >= 0 && itvOf(up).hi() == 16777216,
+                  "precision : an accumulator of [0, 1] stops at 2^24" + p);
+            // bounded above only, by the seed [-inf, 2^24] ; the max bounds it below
+            check(itvOf(two).hi() == 16777216 && itvOf(lo).isBounded() && itvOf(lo).lo() >= 1.5,
+                  "precision : an accumulator bounded above only, then by a max" + p);
+        } else {
+            check(itvOf(up).isValid() && itvOf(up).hi() > 16777216, "precision : an accumulator passes 2^24" + p);
+        }
+        inclusion("accumulators", o, precision);
+    }
+}
+
 static void negations()
 {
     section("the negation neg");
@@ -1053,6 +1083,7 @@ int main()
     phases();
     kernels();
     counters();
+    accumulators();
     negations();
     products();
     invalidities();
