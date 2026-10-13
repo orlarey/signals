@@ -963,6 +963,38 @@ static void accumulators()
     }
 }
 
+static void guardedSums()
+{
+    section("the guarded sums, typed in both cases of their guard");
+    for (int precision : {1, 2}) {
+        const std::string p   = precision == 1 ? " (float)" : " (double)";
+        Tree              t   = slider("gt" + p, 0, 0, 1);
+        Tree              inc = slider("gi" + p, 0.5, 0, 1);
+        Tree              w   = slider("gw" + p, 0.1, 0, 0.5);
+        // y = y (1 - w [t <= 1/2 & y > 0]) + inc [t > 1/2 & y < 1] : the attack adds inc
+        // only while y < 1, so y stays below 1 + inc <= 2
+        auto env = [&](const std::string& name, bool disjunction) {
+            return rec1(name + p, [&](Tree yy) {
+                Tree rel    = sigFloatCast(sigAND(sigLE(t, sigReal(0.5)), sigGT(yy, sigReal(0.0))));
+                Tree cond   = disjunction ? sigOR(sigGT(t, sigReal(0.5)), sigLT(yy, sigReal(1.0)))
+                                          : sigAND(sigGT(t, sigReal(0.5)), sigLT(yy, sigReal(1.0)));
+                Tree attack = sigMul(inc, sigFloatCast(cond));
+                return sigAdd(sigMul(yy, sigSub(sigReal(1.0), sigMul(w, rel))), attack);
+            });
+        };
+        Tree y = env("genv", false);
+        Tree z = env("genvor", true);  // a disjunction restricts nothing : y may grow
+        Tree o = outs({y, z});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        check(itvOf(y).isValid() && itvOf(y).lo() >= 0 && itvOf(y).hi() <= 2,
+              "precision : an attack guarded by y < 1 keeps the envelope within [0, 2]" + p);
+        check(!(itvOf(z).isBounded() && itvOf(z).hi() <= 16),
+              "soundness : an attack guarded by (t > 1/2) | (y < 1) is not bounded by the guard" + p);
+        inclusion("guarded sums", o, precision);
+    }
+}
+
 static void negations()
 {
     section("the negation neg");
@@ -1101,6 +1133,7 @@ int main()
     kernels();
     counters();
     accumulators();
+    guardedSums();
     negations();
     products();
     invalidities();

@@ -37,6 +37,8 @@
 #include "affine_ops.hh"  // the numeric core: AffItv, AffineOps (interval library)
 #include "ppsig.hh"
 #include "signalAlgebra.hh"
+#include "sigattributes.hh"
+#include "sigtype.hh"
 #include "sigtyperules.hh"
 
 //----------------------------------------------------------------------------------------
@@ -70,6 +72,8 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
 
     /// The content of the tables generated at init, analysed apart (tableContent)
     mutable std::unordered_map<Tree, AffItv> fTableContent;
+    /// The exact attributes of the root, when known : the nature of a value
+    const ExactSolvers* fExact = nullptr;
     /// Memos of the cheap filters of the sum rules (hasRoundingTerm, hasComplementTerm) :
     /// flattening every node of a long sum chain would be quadratic.
     mutable std::unordered_map<Tree, bool> fHasRoundingTerm, fHasComplementTerm;
@@ -685,7 +689,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
             return;
         }
         ov[t] = itv::fromItv(n);
-        if (depth >= 8 || cur.lsb() >= 0) return;  // integer arithmetic may wrap
+        if (depth >= 8 || integerValue(t, cur)) return;  // integer arithmetic may wrap
         int    op;
         Tree   x, y;
         double k;
@@ -794,11 +798,11 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         int  op;
         Tree x, y, z, w;
         // the operations of the current sample : the binary ones, casts, select2, the
-        // primitives, and the compound operations of the normal form (sum, negation,
-        // remainders, tpt, mix) ; a FIR or an IIR reads the past and stops the walk
+        // primitives, and the compound operations of the normal form (sum, product,
+        // negation, remainders, tpt, mix) ; a FIR or an IIR reads the past and stops the walk
         const bool instantaneous = isSigBinOp(t, &op, x, y) || isSigIntCast(t, x) ||
                                    isSigFloatCast(t, x) || isSigSelect2(t, x, y, z) ||
-                                   isSigSum(t) || isSigNeg(t, x) || isSigFrac(t, x) ||
+                                   isSigSum(t) || isSigProd(t) || isSigNeg(t, x) || isSigFrac(t, x) ||
                                    isSigCfrac(t, x) || isSigTpt(t, x) || isSigMix(t, x, y, w) ||
                                    isSigPhase(t, x, y) ||
                                    getUserData(t) != nullptr;
@@ -825,6 +829,126 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         const AffItv v = itv::AffineOps<SignalAlgebra<AffItv>>::combine(t, kids, ev);
         memo[t]        = v;
         return v;
+    }
+
+    /// the intersection of two sound bounds of a value, as one constant interval over the
+    /// horizon ; the first one when they are disjoint (none is then reached), invalid only
+    /// when both may be
+    AffItv meet(const AffItv& a, const AffItv& b) const
+    {
+        if (a.isEmpty() || b.isEmpty()) return a;
+        const interval ia = itv::toItv(a, fT), ib = itv::toItv(b, fT);
+        const double   lo = std::max(ia.lo(), ib.lo()), hi = std::min(ia.hi(), ib.hi());
+        if (lo > hi) return a;
+        AffItv r       = itv::fromItv(interval(lo, hi, std::min(ia.lsb(), ib.lsb())));
+        r.mayBeInvalid = a.mayBeInvalid && b.mayBeInvalid;
+        return r;
+    }
+
+    /// a comparison of a value with a number, asserted by a guard
+    struct Comparison {
+        int    op;
+        Tree   value;
+        double k;
+    };
+
+    /// g is a guard, a value 0 or 1 : a comparison, a conjunction & of guards, or the
+    /// float of a guard ; the comparisons of a value with a number it asserts when it is 1
+    /// are added to cmps (the other comparisons hold too, but restrict nothing)
+    static bool guardOf(Tree g, std::vector<Comparison>& cmps, int depth)
+    {
+        Tree   x, y;
+        int    op;
+        double k;
+        if (depth > 8) return false;
+        if (isSigFloatCast(g, x)) return guardOf(x, cmps, depth + 1);
+        if (!isSigBinOp(g, &op, x, y)) return false;
+        if (op == kAND) return guardOf(x, cmps, depth + 1) && guardOf(y, cmps, depth + 1);
+        if (op < kGT || op > kNE) return false;
+        if (constNum(y, k)) {
+            cmps.push_back({op, x, k});
+        } else if (constNum(x, k)) {
+            cmps.push_back({mirror(op), y, k});
+        }
+        return true;
+    }
+
+    /// A sum whose terms are multiplied by guards, typed in each case of its guards : a
+    /// guard is 0 or 1 ; at 0 its term is 0 (or invalid, when the term may be) ; at 1 the
+    /// comparisons it asserts hold, and the values they compare are restricted to their
+    /// true side, in every term of the sum (the release of an envelope y * (1 - p * w)
+    /// plus its attack [y < 1] * inc stays below 1 + inc). At most two guarded terms, the
+    /// others read as values in [0, 1]. Nothing when the sum has no guarded term.
+    bool guardedSum(Tree sig, FixPointEvaluator<AffItv>& ev, AffItv& result) const
+    {
+        struct Guarded {
+            std::vector<Tree>       nodes;
+            std::vector<Comparison> cmps;
+        };
+        std::vector<Guarded> gs;
+        for (int i = 0; i < sig->arity() && gs.size() < 2; i++) {
+            Tree t = sig->branch(i), u, a, b;
+            int  op;
+            if (isSigNeg(t, u)) t = u;
+            tvec fs;
+            if (!isSigProd(t, fs)) {
+                if (isSigBinOp(t, &op, a, b) && op == kMul) {
+                    fs = {a, b};
+                } else {
+                    continue;
+                }
+            }
+            Guarded g;
+            for (Tree f : fs) {
+                std::vector<Comparison> cm;
+                if (guardOf(f, cm, 0)) {
+                    g.nodes.push_back(f);
+                    g.cmps.insert(g.cmps.end(), cm.begin(), cm.end());
+                }
+            }
+            if (!g.nodes.empty() && !g.cmps.empty()) gs.push_back(g);
+        }
+        if (gs.empty()) return false;
+        // the trees the cases override : the guards, and the values a comparison restricts
+        SelectReads sr;
+        for (const Guarded& g : gs) {
+            for (Tree n : g.nodes) sr.keys.insert(n);
+            for (const Comparison& cm : g.cmps) chainOf(cm.value, sr.keys, 0);
+        }
+        const int m   = int(gs.size());
+        AffItv    acc = itv::aempty();
+        bool      any = false;
+        for (int mask = 0; mask < (1 << m); mask++) {
+            Overrides ov;
+            bool      impossible = false;
+            for (int j = 0; j < m && !impossible; j++) {
+                const bool truth = (mask >> j) & 1;
+                for (Tree n : gs[j].nodes) {
+                    const int lsb = itv::toItv(ev.eval(n), fT).lsb();
+                    ov[n]         = itv::fromItv(interval(truth, truth, lsb));
+                }
+                if (!truth) continue;
+                for (const Comparison& cm : gs[j].cmps) {
+                    const interval                iv   = itv::toItv(ev.eval(cm.value), fT);
+                    const std::optional<interval> side = sideOf(cm.op, cm.k, true, integerValue(cm.value, iv));
+                    if (!side || iv.isEmpty()) continue;
+                    narrowTo(cm.value, *side, ov, ev, 0);
+                    auto o = ov.find(cm.value);
+                    if (o != ov.end() && itv::toItv(o->second, fT).isEmpty()) impossible = true;
+                }
+            }
+            if (impossible) continue;  // this case never holds
+            Overrides           memo;
+            std::vector<AffItv> kids;
+            kids.reserve(sig->arity());
+            for (int i = 0; i < sig->arity(); i++) kids.push_back(evalUnder(sig->branch(i), ov, ev, sr, memo));
+            const AffItv r = itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, kids, ev);
+            acc            = any ? itv::ajoin(acc, r, fT) : r;
+            any            = true;
+        }
+        if (!any) return false;
+        result = acc;
+        return true;
     }
 
     /// select2 typed under its condition, or nothing
@@ -857,7 +981,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         bool   refined = false;
         for (int truth = 0; truth < 2; truth++) {
             Tree                    s    = truth ? s1 : s0;
-            std::optional<interval> side = sideOf(op, k, truth, iv.lsb() >= 0);
+            std::optional<interval> side = sideOf(op, k, truth, integerValue(v, iv));
             if (!side || (!truth && iv.mayBeInvalid())) {
                 branch[truth] = ev.eval(s);
                 continue;
@@ -1265,8 +1389,13 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         if (isSigIIR(sig) && firstOrderMix(sig, c, ev, r)) return r;
         if (isSigIIR(sig) && integerAccumulator(sig, c, r)) return r;
         if (isSigIIR(sig)) return iirBound(sig, c);
-        if (isSum(sig) && hasRoundingTerm(sig) && fractionalSum(sig, ev, r)) return r;
-        if (isSum(sig) && hasComplementTerm(sig) && mixSum(sig, ev, r)) return r;
+        // a sum typed in the cases of its guards, and by the sum rules : two sound bounds,
+        // intersected
+        AffItv     guarded;
+        const bool hasGuards = isSum(sig) && guardedSum(sig, ev, guarded);
+        if (isSum(sig) && hasRoundingTerm(sig) && fractionalSum(sig, ev, r)) return hasGuards ? meet(r, guarded) : r;
+        if (isSum(sig) && hasComplementTerm(sig) && mixSum(sig, ev, r)) return hasGuards ? meet(r, guarded) : r;
+        if (hasGuards) return meet(guarded, itv::AffineOps<SignalAlgebra<AffItv>>::combine(sig, c, ev));
         // A table generated at init : its content is the generator over n samples
         {
             Tree size, gen, wi, ws, content;
@@ -1390,6 +1519,16 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     {
     }
 
+    void setExact(const ExactSolvers* exact) { fExact = exact; }
+
+    /// t is an integer value : its nature when the exact attributes are known, its lsb
+    /// otherwise (a probe seed has the lsb of an integer, whatever its variable)
+    bool integerValue(Tree t, const interval& i) const
+    {
+        if (fExact) return fExact->nature(t) == kInt;
+        return i.lsb() >= 0;
+    }
+
     /// The content of a table of n elements filled at init by the generator gen : the
     /// generator runs n samples from its own initial state (it is compiled apart, with its
     /// own recursions), so its values are those of a separate analysis over its samples 0
@@ -1403,6 +1542,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         AffItv r = itv::aempty();
         if (n > 0 && double(n - 1) < fT) {
             HorizonAlgebra           sub(double(n - 1), fDefaults);
+            sub.setExact(fExact);
             FixPointIterator<AffItv> iter(getRecPlan(gen), sub);
             const AffItv             g = iter.value(gen);
             if (!g.isEmpty()) {
@@ -1443,15 +1583,16 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
     // decrease without bound (a max bounds it below afterwards).
     std::vector<AffItv> probeSeeds(Tree) const override
     {
+        const int           lsb = 0;
         std::vector<AffItv> seeds;
         for (int e = 0; e <= 28; e += 4) {
             const double m = std::ldexp(1.0, e);
-            seeds.push_back(itv::fromItv(interval(0, m, 0)));
-            seeds.push_back(itv::fromItv(interval(-m, m, 0)));
-            seeds.push_back(itv::fromItv(interval(-HUGE_VAL, m, 0)));
+            seeds.push_back(itv::fromItv(interval(0, m, lsb)));
+            seeds.push_back(itv::fromItv(interval(-m, m, lsb)));
+            seeds.push_back(itv::fromItv(interval(-HUGE_VAL, m, lsb)));
         }
-        seeds.push_back(itv::fromItv(interval(0, kBig, 0)));
-        seeds.push_back(itv::fromItv(interval(-kBig, kBig, 0)));
+        seeds.push_back(itv::fromItv(interval(0, kBig, lsb)));
+        seeds.push_back(itv::fromItv(interval(-kBig, kBig, lsb)));
         return seeds;
     }
     void recordProbe(Tree var, const AffItv& probed, bool certified) const override
@@ -1699,13 +1840,14 @@ struct HorizonReader::Impl {
     HorizonAlgebra           algebra;
     FixPointIterator<AffItv> it;
 
-    explicit Impl(Tree L)
+    Impl(Tree L, const ExactSolvers* exact)
         : plan(getRecPlan(L)), algebra(/*defaultParams*/ false), it(plan, algebra)
     {
+        algebra.setExact(exact);
     }
 };
 
-HorizonReader::HorizonReader(Tree L) : fImpl(new Impl(L)) {}
+HorizonReader::HorizonReader(Tree L, const ExactSolvers* exact) : fImpl(new Impl(L, exact)) {}
 
 HorizonReader::~HorizonReader()
 {
