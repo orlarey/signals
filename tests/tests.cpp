@@ -267,6 +267,22 @@ static void checkNatureFixpoint()
         check(outs2 != outs,
               "identity: recursive groups get fresh variables (alpha, not equality)");
     }
+
+    // The equations : the members of a recursive group named R0.0, R0.1 and defined on
+    // consecutive lines, a shared subexpression named and defined once, before its uses.
+    {
+        Tree shared = sigMul(recC1, sigInt(3));
+        Tree sum    = sigAdd(shared, recC0);
+        Tree diff   = sigSub(shared, sigInput(0));
+        Tree L      = list2(sum, diff);
+        std::ostringstream eqs;
+        ppsigEquations(L, eqs);
+        check(eqs.str() ==
+                  "R0.0 = 1+R0.0';\n"
+                  "R0.1 = 0.5*R0.0+R0.1';\n"
+                  "E0   = R0.1*3;\n"
+                  "process = (E0+R0.0, E0-IN[0]);\n", "equations: groups and shared subexpressions named once");
+    }
 }
 
 int main()

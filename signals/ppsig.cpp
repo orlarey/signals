@@ -20,6 +20,7 @@
  ************************************************************************/
 
 #include "ppsig.hh"
+#include <algorithm>
 #include <vector>
 #include "sigs-config.hh"
 #include "binop.hh"
@@ -32,55 +33,60 @@
 using namespace std;
 
 ppsig::ppsig(Tree s, int max_size)
-    : fSig(s), fEnv(::nil()), fPriority(0), fHideRecursion(false), fMaxSize(max_size)
+    : fSig(s),
+      fEnv(::nil()),
+      fPriority(0),
+      fHideRecursion(false),
+      fMaxSize(max_size),
+      fNames(nullptr),
+      fExpand(false)
 {
 }
 
 ostream& ppsig::printinfix(ostream& fout, const string& opname, int priority, Tree x, Tree y) const
 {
-#if 0
+    // x op y : the left operand at the priority of op, the right one above it, so that the
+    // parentheses show the association (a-(b-c) is not a-b-c)
     if (fPriority > priority) {
         fout << "(";
     }
-    fout << ppsig(x, fEnv, priority, fMaxSize) << opname << ppsig(y, fEnv, priority, fMaxSize);
+    fout << ppsig(x, fEnv, priority, fMaxSize, fNames) << opname << ppsig(y, fEnv, priority + 1, fMaxSize, fNames);
     if (fPriority > priority) {
         fout << ")";
     }
     return fout;
-#endif
-    return printfun(fout, opname, x, y);
 }
 
 ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x) const
 {
-    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize) << ')';
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y) const
 {
-    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize) << ','
-                << ppsig(y, fEnv, 0, fMaxSize) << ')';
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(y, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z) const
 {
-    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize) << ','
-                << ppsig(y, fEnv, 0, fMaxSize) << ',' << ppsig(z, fEnv, 0, fMaxSize) << ')';
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(y, fEnv, 0, fMaxSize, fNames) << ", " << ppsig(z, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z, Tree zz) const
 {
-    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize) << ','
-                << ppsig(y, fEnv, 0, fMaxSize) << ',' << ppsig(z, fEnv, 0, fMaxSize) << ','
-                << ppsig(zz, fEnv, 0, fMaxSize) << ')';
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(y, fEnv, 0, fMaxSize, fNames) << ", " << ppsig(z, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(zz, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printfun(ostream& fout, const string& funame, Tree x, Tree y, Tree z, Tree z2,
                          Tree z3) const
 {
-    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize) << ','
-                << ppsig(y, fEnv, 0, fMaxSize) << ',' << ppsig(z, fEnv, 0, fMaxSize) << ','
-                << ppsig(z2, fEnv, 0, fMaxSize) << ',' << ppsig(z3, fEnv, 0, fMaxSize) << ')';
+    return fout << funame << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(y, fEnv, 0, fMaxSize, fNames) << ", " << ppsig(z, fEnv, 0, fMaxSize, fNames) << ", "
+                << ppsig(z2, fEnv, 0, fMaxSize, fNames) << ", " << ppsig(z3, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printui(ostream& fout, const string& funame, Tree label) const
@@ -95,8 +101,8 @@ ostream& ppsig::printui(ostream& fout, const string& funame, Tree label, Tree lo
 {
     fout << funame << '(';
     printlabel(fout, label);
-    return fout << ',' << ppsig(lo, fEnv, 0, fMaxSize) << ',' << ppsig(hi, fEnv, 0, fMaxSize) << ','
-                << ppsig(step, fEnv, 0, fMaxSize) << ')';
+    return fout << ',' << ppsig(lo, fEnv, 0, fMaxSize, fNames) << ',' << ppsig(hi, fEnv, 0, fMaxSize, fNames) << ','
+                << ppsig(step, fEnv, 0, fMaxSize, fNames) << ')';
 }
 
 ostream& ppsig::printui(ostream& fout, const string& funame, Tree label, Tree cur, Tree lo, Tree hi,
@@ -104,8 +110,8 @@ ostream& ppsig::printui(ostream& fout, const string& funame, Tree label, Tree cu
 {
     fout << funame << '(';
     printlabel(fout, label);
-    return fout << ',' << ppsig(cur, fEnv, 0, fMaxSize) << ',' << ppsig(lo, fEnv, 0, fMaxSize)
-                << ',' << ppsig(hi, fEnv, 0, fMaxSize) << ',' << ppsig(step, fEnv, 0, fMaxSize)
+    return fout << ',' << ppsig(cur, fEnv, 0, fMaxSize, fNames) << ',' << ppsig(lo, fEnv, 0, fMaxSize, fNames)
+                << ',' << ppsig(hi, fEnv, 0, fMaxSize, fNames) << ',' << ppsig(step, fEnv, 0, fMaxSize, fNames)
                 << ')';
 }
 
@@ -114,7 +120,7 @@ ostream& ppsig::printout(ostream& fout, int i, Tree x) const
     if (fPriority > 0) {
         fout << "(";
     }
-    fout << "OUT" << i << " = " << ppsig(x, fEnv, 0, fMaxSize);
+    fout << "OUT" << i << " = " << ppsig(x, fEnv, 0, fMaxSize, fNames);
     if (fPriority > 0) {
         fout << ")";
     }
@@ -138,7 +144,7 @@ ostream& ppsig::printlist(ostream& fout, Tree largs) const
     string sep = "";
     fout << '(';
     while (!isNil(largs)) {
-        fout << sep << ppsig(hd(largs), fEnv, 0, fMaxSize);
+        fout << sep << ppsig(hd(largs), fEnv, 0, fMaxSize, fNames);
         sep   = ", ";
         largs = tl(largs);
     }
@@ -155,14 +161,20 @@ ostream& ppsig::printff(ostream& fout, Tree ff, Tree largs) const
 
 ostream& ppsig::printDelay(ostream& fout, Tree exp, Tree delay) const
 {
-    // int d;
-
-    // if (isSigInt(delay, &d) && (d == 1)) {
-    //     fout << ppsig(exp, fEnv, 8, fMaxSize) << "'";
-    // } else {
-    //     printinfix(fout, "@", 8, exp, delay);
-    // }
-    printfun(fout, "Delay", exp, delay);
+    // x' and x@d bind tighter than every binary operator, their operands above them ;
+    // x@0 is x
+    int d;
+    if (isSigInt(delay, &d) && (d == 0)) {
+        return fout << ppsig(exp, fEnv, fPriority, fMaxSize, fNames);
+    }
+    if (fPriority > 10) fout << "(";
+    fout << ppsig(exp, fEnv, 11, fMaxSize, fNames);
+    if (isSigInt(delay, &d) && (d == 1)) {
+        fout << "'";
+    } else {
+        fout << "@" << ppsig(delay, fEnv, 11, fMaxSize, fNames);
+    }
+    if (fPriority > 10) fout << ")";
     return fout;
 }
 
@@ -174,7 +186,7 @@ ostream& ppsig::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
         fout << *var;
     } else {
         stringstream str_rec;
-        str_rec << ppsig(lexp, addElement(var, fEnv), 0, fMaxSize);
+        str_rec << ppsig(lexp, addElement(var, fEnv), 0, fMaxSize, fNames);
         if (str_rec.tellp() == 0) {
             fout << "letrec(" << *var << " = ...)";
         } else {
@@ -187,7 +199,7 @@ ostream& ppsig::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
 ostream& ppsig::printrec(ostream& fout, Tree lexp, bool hide) const
 {
     stringstream str_rec;
-    str_rec << ppsig(lexp, fEnv, 0, fMaxSize);
+    str_rec << ppsig(lexp, fEnv, 0, fMaxSize, fNames);
     if (str_rec.tellp() == 0) {
         fout << "debruijn(...)";
     } else {
@@ -203,7 +215,7 @@ ostream& ppsig::printextended(ostream& fout, Tree sig1) const
 
     fout << p->name() << '(';
     for (int i = 0; i < sig1->arity(); i++) {
-        fout << sep << ppsig(sig1->branch(i), fEnv, 0, fMaxSize);
+        fout << sep << ppsig(sig1->branch(i), fEnv, 0, fMaxSize, fNames);
         sep = ", ";
     }
     fout << ')';
@@ -218,6 +230,12 @@ ostream& ppsig::print(ostream& fout) const
         return fout;
     }
 
+    // a named node is printed as its name
+    std::string named;
+    if (fNames && !fExpand && fNames->lookup(fSig, named)) {
+        return fout << named;
+    }
+
     int    i;
     double r;
     Tree   c, sel, w, x, y, z, u, var, le, label, ff, largs, type, name, file, sf;
@@ -225,7 +243,7 @@ ostream& ppsig::print(ostream& fout) const
     if (isList(fSig)) {
         printlist(fout, fSig);
     } else if (isProj(fSig, &i, x)) {
-        fout << "proj" << i << '(' << ppsig(x, fEnv, 0, fMaxSize) << ')';
+        fout << "proj" << i << '(' << ppsig(x, fEnv, 0, fMaxSize, fNames) << ')';
     } else if (isRec(fSig, var, le)) {
         printrec(fout, var, le, fHideRecursion /*&& (getRecursivness(sig)==0)*/);
     }
@@ -273,15 +291,15 @@ ostream& ppsig::print(ostream& fout) const
             printfun(fout, "WRTbl2p", w, x);
         } else {
             // rwtable
-            fout << "sigWRTbl4p(" << ppsig(w, fEnv, 0, fMaxSize);
-            fout << "; " << ppsig(x, fEnv, 0, fMaxSize);
-            fout << "; " << ppsig(y, fEnv, 0, fMaxSize);
-            fout << "; " << ppsig(z, fEnv, 0, fMaxSize) << " )";
+            fout << "sigWRTbl4p(" << ppsig(w, fEnv, 0, fMaxSize, fNames);
+            fout << "; " << ppsig(x, fEnv, 0, fMaxSize, fNames);
+            fout << "; " << ppsig(y, fEnv, 0, fMaxSize, fNames);
+            fout << "; " << ppsig(z, fEnv, 0, fMaxSize, fNames) << " )";
         }
     } else if (isSigRDTbl(fSig, x, y)) {
         printfun(fout, "sigRDTbl", x, y);
     } else if (isSigGen(fSig, x)) {
-        fout << "sigGen(" << ppsig(x, fEnv, fPriority, fMaxSize) << ")";
+        fout << "sigGen(" << ppsig(x, fEnv, fPriority, fMaxSize, fNames) << ")";
     }
 
     else if (isSigDocConstantTbl(fSig, x, y)) {
@@ -307,7 +325,10 @@ ostream& ppsig::print(ostream& fout) const
     } else if (isSigPhase(fSig, x, y)) {
         printfun(fout, "phase", x, y);
     } else if (isSigNeg(fSig, x)) {
-        printfun(fout, "neg", x);
+        // -x : its operand above the product, in parentheses when compound
+        if (fPriority > 9) fout << "(";
+        fout << "-" << ppsig(x, fEnv, 10, fMaxSize, fNames);
+        if (fPriority > 9) fout << ")";
     }
 
     else if (isSigIntCast(fSig, x)) {
@@ -356,15 +377,37 @@ ostream& ppsig::print(ostream& fout) const
         printfun(fout, "register", sigInt(i), x);
     }
 
-    else if (isSigFIR(fSig) || isSigIIR(fSig) || isSigSum(fSig) || isSigProd(fSig)) {
-        // n-ary kernels : generic bracketed print
-        fout << (isSigFIR(fSig) ? "FIR[" : (isSigIIR(fSig) ? "IIR[" : (isSigSum(fSig) ? "Sum[" : "Prod[")));
-        std::string sep = "";
+    else if (isSigSum(fSig) || isSigProd(fSig)) {
+        // the n-ary sum and product of the normal form : an infix chain, computed from left
+        // to right ; a right operand of the same priority keeps its parentheses, so that the
+        // association shows (2*(x*y) is not 2*x*y) ; a negative term of a sum is subtracted
+        const bool sum = isSigSum(fSig);
+        const int  pr  = gBinOpTable[sum ? kAdd : kMul]->fPriority;
+        if (fPriority > pr) fout << "(";
+        bool first = true;
         for (Tree b : fSig->branches()) {
-            fout << sep << ppsig(b, fEnv, fPriority);
-            sep = ", ";
+            Tree u;
+            if (first) {
+                fout << ppsig(b, fEnv, pr, fMaxSize, fNames);
+            } else if (sum && isSigNeg(b, u) && !(fNames && fNames->lookup(b, named))) {
+                fout << "-" << ppsig(u, fEnv, pr + 1, fMaxSize, fNames);
+            } else {
+                fout << (sum ? "+" : "*") << ppsig(b, fEnv, pr + 1, fMaxSize, fNames);
+            }
+            first = false;
         }
-        fout << ']';
+        if (fPriority > pr) fout << ")";
+    }
+
+    else if (isSigFIR(fSig) || isSigIIR(fSig)) {
+        // FIR(x; c0, c1, ...) and IIR(x; c1, ...) : the source, then the coefficients
+        fout << (isSigFIR(fSig) ? "FIR(" : "IIR(");
+        int k = 0;
+        for (Tree b : fSig->branches()) {
+            fout << (k == 0 ? "" : (k == 1 ? "; " : ", ")) << ppsig(b, fEnv, 0, fMaxSize, fNames);
+            k++;
+        }
+        fout << ')';
     }
 
     else {
@@ -566,6 +609,9 @@ ostream& ppsigShared::print(ostream& fout) const
 
     else if (isSigDelay1(fSig, x)) {
         SIG_INSERT_ID(printDelay(s, x, sigInt(1)));
+    } else if (isSigDelay(fSig, x, y) && isSigInt(y, &i) && (i == 0)) {
+        // x@0 is x
+        fout << ppsigShared(x, fEnv);
     } else if (isSigDelay(fSig, x, y)) {
         SIG_INSERT_ID(printDelay(s, x, y));
     } else if (isSigPrefix(fSig, x, y)) {
@@ -617,7 +663,39 @@ ostream& ppsigShared::print(ostream& fout) const
     } else if (isSigPhase(fSig, x, y)) {
         SIG_INSERT_ID(printfun(s, "phase", x, y));
     } else if (isSigNeg(fSig, x)) {
-        SIG_INSERT_ID(printfun(s, "neg", x));
+        SIG_INSERT_ID(s << "-" << ppsigShared(x, fEnv, 10));
+    }
+
+    else if (isSigSum(fSig) || isSigProd(fSig)) {
+        // the n-ary sum and product, as ppsig writes them
+        const bool sum   = isSigSum(fSig);
+        const int  pr    = gBinOpTable[sum ? kAdd : kMul]->fPriority;
+        auto       chain = [&](std::ostream& o) {
+            bool first = true;
+            for (Tree b : fSig->branches()) {
+                Tree u;
+                if (first) {
+                    o << ppsigShared(b, fEnv, pr);
+                } else if (sum && isSigNeg(b, u)) {
+                    o << "-" << ppsigShared(u, fEnv, pr + 1);
+                } else {
+                    o << (sum ? "+" : "*") << ppsigShared(b, fEnv, pr + 1);
+                }
+                first = false;
+            }
+        };
+        SIG_INSERT_ID(chain(s));
+    } else if (isSigFIR(fSig) || isSigIIR(fSig)) {
+        auto kernel = [&](std::ostream& o) {
+            o << (isSigFIR(fSig) ? "FIR(" : "IIR(");
+            int k = 0;
+            for (Tree b : fSig->branches()) {
+                o << (k == 0 ? "" : (k == 1 ? "; " : ", ")) << ppsigShared(b, fEnv, 0);
+                k++;
+            }
+            o << ')';
+        };
+        SIG_INSERT_ID(kernel(s));
     }
 
     else if (isSigIntCast(fSig, x)) {
@@ -686,4 +764,269 @@ void ppsigShared::printIDs(ostream& fout, bool sort)
     for (const auto& it : sigs::g.gSignalTrace) {
         fout << it;
     }
+}
+
+/*****************************************************************************
+                        Signals printed as equations
+*****************************************************************************/
+
+bool ppsigNames::lookup(Tree t, std::string& name) const
+{
+    int  i;
+    Tree group;
+    if (isProj(t, &i, group)) {
+        auto g = fGroups.find(group);
+        if (g != fGroups.end()) {
+            name = "R" + std::to_string(g->second.first);
+            if (g->second.second > 1) {
+                name += "." + std::to_string(i);
+            }
+            return true;
+        }
+    }
+    auto s = fShared.find(t);
+    if (s != fShared.end()) {
+        name = s->second;
+        return true;
+    }
+    return false;
+}
+
+bool ppsigNames::groupName(Tree group, std::string& name) const
+{
+    auto g = fGroups.find(group);
+    if (g == fGroups.end()) {
+        return false;
+    }
+    name = "R" + std::to_string(g->second.first);
+    return true;
+}
+
+// x@0, which is printed as x
+static bool isDelay0(Tree t, Tree& x)
+{
+    Tree d;
+    int  i;
+    return isSigDelay(t, x, d) && isSigInt(d, &i) && (i == 0);
+}
+
+// a signal without subsignals : a number, an input, a user interface element, a constant
+static bool isLeafSig(Tree t)
+{
+    int    i;
+    double r;
+    Tree   label, c, x, y, z, type, name, file;
+    return (t->arity() == 0) || isSigInt(t, &i) || isSigReal(t, &r) || isSigInput(t, &i) ||
+           isRef(t, i) || isSigWaveform(t) || isSigButton(t, label) || isSigCheckbox(t, label) ||
+           isSigVSlider(t, label, c, x, y, z) || isSigHSlider(t, label, c, x, y, z) ||
+           isSigNumEntry(t, label, c, x, y, z) || isSigSoundfile(t, label) ||
+           isSigFConst(t, type, name, file) || isSigFVar(t, type, name, file);
+}
+
+// the subsignals that an equation printing visits
+static void subsignals(Tree t, std::vector<Tree>& v)
+{
+    int  i;
+    Tree x, var, le, ff, largs;
+    if (isLeafSig(t)) {
+        return;
+    } else if (isProj(t, &i, x)) {
+        v.push_back(x);
+    } else if (isRec(t, var, le)) {
+        for (; isList(le); le = tl(le)) {
+            v.push_back(hd(le));
+        }
+    } else if (isList(t)) {
+        for (Tree l = t; isList(l); l = tl(l)) {
+            v.push_back(hd(l));
+        }
+    } else if (isSigFFun(t, ff, largs)) {
+        for (; isList(largs); largs = tl(largs)) {
+            v.push_back(hd(largs));
+        }
+    } else {
+        for (Tree b : t->branches()) {
+            if (!isNil(b)) {
+                v.push_back(b);
+            }
+        }
+    }
+}
+
+// a signal short enough to be printed at each use : a leaf, a recursion, or a delay or a
+// cast or a negation of one of them
+static bool isAtomicSig(Tree t)
+{
+    int  i;
+    Tree x, d, var, le;
+    if (isLeafSig(t) || isProj(t, &i, x) || isRec(t, var, le) || isList(t)) {
+        return true;
+    }
+    if (isSigDelay1(t, x) || (isSigDelay(t, x, d) && isSigInt(d, &i)) || isSigIntCast(t, x) ||
+        isSigFloatCast(t, x) || isSigNeg(t, x)) {
+        return isAtomicSig(x);
+    }
+    return false;
+}
+
+// the number of distinct parents of each node ; x@0 is transparent, a parent of x@0 is a
+// parent of x
+void ppsigEquations::count(Tree t)
+{
+    Tree x;
+    if (isDelay0(t, x)) {
+        count(x);
+        return;
+    }
+    if (fCount[t]++ > 0) {
+        return;
+    }
+    std::vector<Tree> subs;
+    subsignals(t, subs);
+    for (Tree s : subs) {
+        count(s);
+    }
+}
+
+std::string ppsigEquations::expand(Tree t) const
+{
+    std::stringstream str;
+    str << ppsig(t, ::nil(), 0, INT_MAX, &fNames, true);
+    return str.str();
+}
+
+// whether t is defined by an equation of its own
+bool ppsigEquations::isNamed(Tree t) const
+{
+    if (isAtomicSig(t)) {
+        return false;
+    }
+    if (fAll) {
+        // a negation used once is printed by its sum as a subtraction
+        Tree x;
+        return !isSigNeg(t, x) || (fCount.at(t) >= 2);
+    }
+    return fCount.at(t) >= 2;
+}
+
+std::string ppsigEquations::nameOf(Tree t)
+{
+    auto s = fNames.fShared.find(t);
+    if (s != fNames.fShared.end()) {
+        return s->second;
+    }
+    std::string name     = "E" + std::to_string(fNextShared++);
+    fNames.fShared[t] = name;
+    return name;
+}
+
+// defines the names that the printing of t uses, in a post-order traversal, then t's own
+// equation. A node met again while it is being defined depends on a recursion that reads
+// it : it is named at once, so that the equations of the recursion can refer to it.
+void ppsigEquations::define(Tree t)
+{
+    int  i;
+    Tree x, group, var, le;
+    if (isDelay0(t, x)) {
+        define(x);
+        return;
+    }
+    if (!fVisited.insert(t).second) {
+        if (fOnStack.count(t) && isNamed(t)) {
+            nameOf(t);
+        }
+        return;
+    }
+    if (isProj(t, &i, group) && isRec(group, var, le)) {
+        defineGroup(group);
+        return;
+    }
+    fOnStack.insert(t);
+    std::vector<Tree> subs;
+    subsignals(t, subs);
+    for (Tree s : subs) {
+        define(s);
+    }
+    fOnStack.erase(t);
+    if (isNamed(t)) {
+        nameOf(t);
+        fLines.push_back({t, nullptr, 0});
+    }
+}
+
+// a recursive group : its number is given when it is first met, so that the members of an
+// enclosing group, referenced from its body, already have a name ; its members are defined
+// on consecutive lines, after the names their bodies use
+void ppsigEquations::defineGroup(Tree group)
+{
+    Tree var, le;
+    if (fNames.fGroups.count(group) || !isRec(group, var, le)) {
+        return;
+    }
+    std::vector<Tree> members;
+    for (; isList(le); le = tl(le)) {
+        members.push_back(hd(le));
+    }
+    const int number              = fNextGroup++;
+    fNames.fGroups[group]         = std::make_pair(number, int(members.size()));
+    for (Tree e : members) {
+        if (fVisited.insert(e).second) {
+            std::vector<Tree> subs;
+            subsignals(e, subs);
+            for (Tree s : subs) {
+                define(s);
+            }
+        }
+    }
+    for (size_t i = 0; i < members.size(); i++) {
+        fLines.push_back({members[i], group, int(i)});
+    }
+}
+
+ppsigEquations::ppsigEquations(Tree L, bool all) : fRoot(L), fAll(all)
+{
+    count(L);
+    define(L);
+
+    // the names numbered in the order of the equations
+    int shared = 0;
+    int groups = 0;
+    for (const Equation& e : fLines) {
+        if (e.fGroup == nullptr) {
+            fNames.fShared[e.fNode] = "E" + std::to_string(shared++);
+        } else if (e.fMember == 0) {
+            fNames.fGroups[e.fGroup].first = groups++;
+        }
+    }
+}
+
+ppsigEquations::ppsigEquations(Tree L, std::ostream& fout, bool all) : ppsigEquations(L, all)
+{
+    print(fout);
+}
+
+void ppsigEquations::print(std::ostream& fout) const
+{
+    std::vector<std::pair<std::string, std::string>> lines;
+    size_t                                           width = 0;
+    for (const Equation& e : fLines) {
+        std::string name;
+        if (e.fGroup == nullptr) {
+            name = fNames.fShared.at(e.fNode);
+        } else {
+            const std::pair<int, int>& g = fNames.fGroups.at(e.fGroup);
+            name = "R" + std::to_string(g.first);
+            if (g.second > 1) {
+                name += "." + std::to_string(e.fMember);
+            }
+        }
+        width = std::max(width, name.size());
+        lines.push_back(std::make_pair(name, expand(e.fNode)));
+    }
+    // the equal signs aligned
+    for (const auto& line : lines) {
+        fout << line.first << std::string(width - line.first.size(), ' ') << " = " << line.second
+             << ";\n";
+    }
+    fout << "process = " << expand(fRoot) << ";" << std::endl;
 }
