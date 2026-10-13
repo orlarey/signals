@@ -984,13 +984,35 @@ static void guardedSums()
         };
         Tree y = env("genv", false);
         Tree z = env("genvor", true);  // a disjunction restricts nothing : y may grow
-        Tree o = outs({y, z});
+        // the attack of envVibrato : a product of guards, one of them negated,
+        // inc * ([t > 1/2 & y < 1] * (1 - [b < 1/2]))
+        Tree b  = slider("gb" + p, 0, 0, 1);
+        Tree pr = rec1("genvp" + p, [&](Tree yy) {
+            Tree rel  = sigFloatCast(sigAND(sigLE(t, sigReal(0.5)), sigGT(yy, sigReal(0.0))));
+            Tree on   = sigAND(sigGT(t, sigReal(0.5)), sigLT(yy, sigReal(1.0)));
+            Tree late = sigSub(sigInt(1), sigLT(b, sigReal(0.5)));
+            Tree att  = sigMul(inc, sigFloatCast(sigMul(on, late)));
+            return sigAdd(sigMul(yy, sigSub(sigReal(1.0), sigMul(w, rel))), att);
+        });
+        // a negated comparison asserts its other side : y climbs by d while y < 1, then
+        // 1 - [y < 1] adds inc at every sample, and y grows without bound
+        Tree d  = slider("gd" + p, 0.5, 0.1, 1);
+        Tree ng = rec1("genvn" + p, [&](Tree yy) {
+            Tree below = sigMul(d, sigFloatCast(sigLT(yy, sigReal(1.0))));
+            Tree above = sigMul(inc, sigFloatCast(sigSub(sigInt(1), sigLT(yy, sigReal(1.0)))));
+            return sigAdd(sigAdd(yy, below), above);
+        });
+        Tree o = outs({y, z, pr, ng});
         itv::programPrecision() = precision;
         typeAnnotation(o, false);
         check(itvOf(y).isValid() && itvOf(y).lo() >= 0 && itvOf(y).hi() <= 2,
               "precision : an attack guarded by y < 1 keeps the envelope within [0, 2]" + p);
         check(!(itvOf(z).isBounded() && itvOf(z).hi() <= 16),
               "soundness : an attack guarded by (t > 1/2) | (y < 1) is not bounded by the guard" + p);
+        check(itvOf(pr).isValid() && itvOf(pr).lo() >= 0 && itvOf(pr).hi() <= 2,
+              "precision : an attack guarded by a product of guards, one negated, stays within [0, 2]" + p);
+        check(!(itvOf(ng).isBounded() && itvOf(ng).hi() <= 16),
+              "soundness : an attack guarded by 1 - [y < 1] (y >= 1) is not bounded" + p);
         inclusion("guarded sums", o, precision);
     }
 }

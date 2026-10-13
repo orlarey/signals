@@ -845,30 +845,52 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
         return r;
     }
 
-    /// a comparison of a value with a number, asserted by a guard
+    /// a comparison of a value with a number, asserted true (or false) by a guard
     struct Comparison {
         int    op;
         Tree   value;
         double k;
+        bool   truth;
     };
 
-    /// g is a guard, a value 0 or 1 : a comparison, a conjunction & of guards, or the
-    /// float of a guard ; the comparisons of a value with a number it asserts when it is 1
-    /// are added to cmps (the other comparisons hold too, but restrict nothing)
-    static bool guardOf(Tree g, std::vector<Comparison>& cmps, int depth)
+    /// g is a guard, a value 0 or 1 : a comparison, a conjunction (& or a product) of
+    /// guards, the negation 1 - c of a guard, or the float of a guard ; the comparisons of
+    /// a value with a number it asserts when it is 1 are added to cmps (the other ones
+    /// hold too, but restrict nothing ; a negated conjunction asserts none)
+    static bool guardOf(Tree g, std::vector<Comparison>& cmps, int depth, bool truth = true)
     {
-        Tree   x, y;
+        Tree   x, y, u;
         int    op;
         double k;
+        tvec   fs;
         if (depth > 8) return false;
-        if (isSigFloatCast(g, x)) return guardOf(x, cmps, depth + 1);
-        if (!isSigBinOp(g, &op, x, y)) return false;
-        if (op == kAND) return guardOf(x, cmps, depth + 1) && guardOf(y, cmps, depth + 1);
-        if (op < kGT || op > kNE) return false;
+        if (isSigFloatCast(g, x)) return guardOf(x, cmps, depth + 1, truth);
+        // 1 - c : the negation of a guard c, true when c is false (an n-ary sum of the
+        // normal form, or a binary subtraction)
+        const bool negation = (isSigSum(g, fs) && fs.size() == 2 && constNum(fs[0], k) && k == 1 && isSigNeg(fs[1], u)) ||
+                              (isSigBinOp(g, &op, x, y) && op == kSub && constNum(x, k) && k == 1 && (u = y));
+        if (negation) {
+            std::vector<Comparison> inner;
+            if (!guardOf(u, inner, depth + 1, !truth)) return false;
+            if (inner.size() == 1) cmps.push_back(inner[0]);  // a single comparison, negated
+            return true;
+        }
+        // a conjunction : & of guards, or their product (1 only when every factor is 1) ;
+        // negated, it asserts nothing about its factors
+        if ((isSigBinOp(g, &op, x, y) && (op == kAND || op == kMul)) || isSigProd(g, fs)) {
+            if (!isSigProd(g, fs)) fs = {x, y};
+            std::vector<Comparison> inner;
+            for (Tree f : fs) {
+                if (!guardOf(f, inner, depth + 1, true)) return false;
+            }
+            if (truth) cmps.insert(cmps.end(), inner.begin(), inner.end());
+            return true;
+        }
+        if (!isSigBinOp(g, &op, x, y) || op < kGT || op > kNE) return false;
         if (constNum(y, k)) {
-            cmps.push_back({op, x, k});
+            cmps.push_back({op, x, k, truth});
         } else if (constNum(x, k)) {
-            cmps.push_back({mirror(op), y, k});
+            cmps.push_back({mirror(op), y, k, truth});
         }
         return true;
     }
@@ -930,7 +952,7 @@ class HorizonAlgebra : public itv::AffineOps<SignalAlgebra<AffItv>> {
                 if (!truth) continue;
                 for (const Comparison& cm : gs[j].cmps) {
                     const interval                iv   = itv::toItv(ev.eval(cm.value), fT);
-                    const std::optional<interval> side = sideOf(cm.op, cm.k, true, integerValue(cm.value, iv));
+                    const std::optional<interval> side = sideOf(cm.op, cm.k, cm.truth, integerValue(cm.value, iv));
                     if (!side || iv.isEmpty()) continue;
                     narrowTo(cm.value, *side, ov, ev, 0);
                     auto o = ov.find(cm.value);
