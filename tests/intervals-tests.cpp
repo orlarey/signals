@@ -1046,6 +1046,37 @@ static void negations()
     }
 }
 
+// the interpolation A + c * (B - A), the state of a TPT one-pole filter s' = s + 2g (x - s) :
+// A read twice, the sum rule forgets it, the rule of mix bounds it between A and B
+static void interpolations()
+{
+    section("the interpolation A + c * (B - A)");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        Tree              x = slider("ix" + p, 0, -1, 1);
+        auto state = [&](const std::string& name, Tree g) {
+            return rec1(name, [&](Tree s) {
+                return sigSum({s, sigProd({sigReal(2.0), g, sigSum({sigNeg(s), x})})});
+            });
+        };
+        // a slow smoother (valhallaSupermassive), a faster one, and a weight from 0.6 to 0.8,
+        // which the library computes from B : the rule leaves it
+        Tree slow   = state("islow", slider("ig" + p, 0.01, 0, 0.0157));
+        Tree fast   = state("ifast", slider("ih" + p, 0.1, 0, 0.24));
+        Tree beyond = state("ibeyond", slider("ik" + p, 0.35, 0.3, 0.4));
+        Tree o      = outs({slow, fast, beyond});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        check(itvOf(slow).lo() >= -1 && itvOf(slow).hi() <= 1 && itvOf(slow).isValid(),
+              "precision : s + 2g (x - s), 2g <= 0.032, stays in [-1, 1]" + p);
+        check(itvOf(fast).lo() >= -1 && itvOf(fast).hi() <= 1 && itvOf(fast).isValid(),
+              "precision : s + 2g (x - s), 2g <= 0.48, stays in [-1, 1]" + p);
+        check(!(itvOf(beyond).lo() >= -1 && itvOf(beyond).hi() <= 1),
+              "premise : a weight from 0.6 to 0.8 (computed from B by mix) is left to the other rules" + p);
+        inclusion("interpolation", o, precision);
+    }
+}
+
 static void products()
 {
     section("the product Prod");
@@ -1158,6 +1189,7 @@ int main()
     guardedSums();
     negations();
     products();
+    interpolations();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
