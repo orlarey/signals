@@ -983,18 +983,240 @@ void ppsigEquations::defineGroup(Tree group)
     }
 }
 
+// the equations that t reads at the current sample : the names met before a delay ; a
+// delay of a constant amount of at least one sample ends the reading, and so does the
+// source of a FIR whose first coefficient is zero
+void ppsigEquations::instantDeps(Tree t, const std::map<Tree, int>& index,
+                                 const std::map<Tree, int>& firstMember, std::set<Tree>& seen,
+                                 std::set<int>& deps) const
+{
+    int    i;
+    double r;
+    Tree   x, d, group;
+    if (!seen.insert(t).second) {
+        return;
+    }
+    if (isProj(t, &i, group)) {
+        auto g = firstMember.find(group);
+        if (g != firstMember.end()) {
+            deps.insert(g->second + i);
+            return;
+        }
+    }
+    auto e = index.find(t);
+    if (e != index.end()) {
+        deps.insert(e->second);
+        return;
+    }
+    if (isSigDelay1(t, x) || (isSigDelay(t, x, d) && isSigInt(d, &i) && (i >= 1))) {
+        return;
+    }
+    std::vector<Tree> subs;
+    subsignals(t, subs);
+    for (size_t k = 0; k < subs.size(); k++) {
+        if (k == 0 && isSigFIR(t) && subs.size() > 1 &&
+            ((isSigInt(subs[1], &i) && i == 0) || (isSigReal(subs[1], &r) && r == 0.0))) {
+            continue;
+        }
+        instantDeps(subs[k], index, firstMember, seen, deps);
+    }
+}
+
+// orders the equations so that every name read at the current sample is defined before :
+// a topological order of the instantaneous readings, which exists in a causal program. The
+// members of a recursive group stay together as soon as the equations they read outside
+// the group are defined ; between equal choices, the order of definition decides. Should
+// a cycle remain (a reading the structure cannot see as delayed), the first equation in
+// the order of definition breaks it.
+void ppsigEquations::order()
+{
+    const int              n = int(fLines.size());
+    std::map<Tree, int>    index;        // a shared subexpression -> its equation
+    std::map<Tree, int>    firstMember;  // a recursive group -> the equation of member 0
+    std::vector<int>       groupOf(n, -1);
+    std::map<Tree, int>    groupNumber;
+    std::vector<std::vector<int>> members;
+    for (int k = 0; k < n; k++) {
+        const Equation& e = fLines[k];
+        if (e.fGroup == nullptr) {
+            index[e.fNode] = k;
+        } else {
+            if (e.fMember == 0) {
+                firstMember[e.fGroup] = k;
+                groupNumber[e.fGroup] = int(members.size());
+                members.push_back({});
+            }
+            groupOf[k] = groupNumber[e.fGroup];
+            members[groupOf[k]].push_back(k);
+        }
+    }
+
+    // the instantaneous dependencies, and the unmet ones
+    std::vector<std::vector<int>> dependents(n);
+    std::vector<int>              unmet(n, 0);
+    std::vector<int>              outside(members.size(), 0);  // unmet readings out of a group
+    for (int k = 0; k < n; k++) {
+        std::set<Tree> seen;
+        std::set<int>  deps;
+        const Equation& e = fLines[k];
+        if (e.fGroup == nullptr) {
+            // the equation's own expression, not its name
+            std::vector<Tree> subs;
+            subsignals(e.fNode, subs);
+            seen.insert(e.fNode);
+            Tree x, d;
+            int  i;
+            if (!(isSigDelay1(e.fNode, x) || (isSigDelay(e.fNode, x, d) && isSigInt(d, &i) && i >= 1))) {
+                for (Tree s : subs) {
+                    instantDeps(s, index, firstMember, seen, deps);
+                }
+            }
+        } else {
+            instantDeps(e.fNode, index, firstMember, seen, deps);
+        }
+        deps.erase(k);
+        for (int dep : deps) {
+            dependents[dep].push_back(k);
+            unmet[k]++;
+            if (groupOf[k] >= 0 && groupOf[dep] != groupOf[k]) {
+                outside[groupOf[k]]++;
+            }
+        }
+    }
+
+    // candidates by their position in the order of definition : an equation (k, -1) out of
+    // any group, or a whole group (first member, g)
+    std::set<std::pair<int, int>> ready;
+    std::set<int>                 remaining;
+    std::vector<bool>             done(n, false);
+    std::vector<Equation>         sorted;
+    for (int k = 0; k < n; k++) {
+        remaining.insert(k);
+        if (groupOf[k] < 0 && unmet[k] == 0) {
+            ready.insert({k, -1});
+        }
+    }
+    for (size_t g = 0; g < members.size(); g++) {
+        if (outside[g] == 0) {
+            ready.insert({members[g][0], int(g)});
+        }
+    }
+
+    auto emit = [&](int k) {
+        done[k] = true;
+        remaining.erase(k);
+        sorted.push_back(fLines[k]);
+        for (int dep : dependents[k]) {
+            if (done[dep]) {
+                continue;
+            }
+            unmet[dep]--;
+            if (groupOf[dep] < 0) {
+                if (unmet[dep] == 0) {
+                    ready.insert({dep, -1});
+                }
+            } else if (groupOf[dep] != groupOf[k]) {
+                if (--outside[groupOf[dep]] == 0) {
+                    ready.insert({members[groupOf[dep]][0], groupOf[dep]});
+                }
+            }
+        }
+    };
+    // a member emitted alone no longer counts in its group's unmet readings
+    auto emitMember = [&](int k) {
+        int g = groupOf[k];
+        if (g >= 0) {
+            // its unmet readings out of the group are dropped from the group's count
+            int dropped = 0;
+            std::set<Tree> seen;
+            std::set<int>  deps;
+            instantDeps(fLines[k].fNode, index, firstMember, seen, deps);
+            for (int dep : deps) {
+                if (!done[dep] && dep != k && groupOf[dep] != g) {
+                    dropped++;
+                }
+            }
+            outside[g] -= dropped;
+            if (outside[g] == 0) {
+                ready.insert({members[g][0], g});
+            }
+        }
+        emit(k);
+    };
+
+    while (!remaining.empty()) {
+        // the first candidate still to emit
+        while (!ready.empty()) {
+            auto c = *ready.begin();
+            bool stale = (c.second < 0) ? done[c.first] : std::all_of(members[c.second].begin(),
+                                                                      members[c.second].end(),
+                                                                      [&](int m) { return done[m]; });
+            if (!stale) {
+                break;
+            }
+            ready.erase(ready.begin());
+        }
+        if (!ready.empty()) {
+            auto c = *ready.begin();
+            ready.erase(ready.begin());
+            if (c.second < 0) {
+                emit(c.first);
+            } else {
+                // the members of the group, each after the members it reads at once
+                const std::vector<int>& ms = members[c.second];
+                for (size_t left = std::count_if(ms.begin(), ms.end(), [&](int m) { return !done[m]; });
+                     left > 0; left--) {
+                    int pick = -1;
+                    for (int m : ms) {
+                        if (!done[m] && unmet[m] == 0) {
+                            pick = m;
+                            break;
+                        }
+                    }
+                    if (pick < 0) {
+                        for (int m : ms) {
+                            if (!done[m]) {
+                                pick = m;
+                                break;
+                            }
+                        }
+                    }
+                    emit(pick);
+                }
+            }
+            continue;
+        }
+        // nothing is ready as a whole : a member whose readings are met, alone, or else the
+        // first remaining equation
+        int pick = -1;
+        for (int k : remaining) {
+            if (groupOf[k] >= 0 && unmet[k] == 0) {
+                pick = k;
+                break;
+            }
+        }
+        if (pick < 0) {
+            pick = *remaining.begin();
+        }
+        emitMember(pick);
+    }
+    fLines = sorted;
+}
+
 ppsigEquations::ppsigEquations(Tree L, bool all) : fRoot(L), fAll(all)
 {
     count(L);
     define(L);
+    order();
 
     // the names numbered in the order of the equations
-    int shared = 0;
-    int groups = 0;
+    int            shared = 0;
+    int            groups = 0;
+    std::set<Tree> numbered;
     for (const Equation& e : fLines) {
         if (e.fGroup == nullptr) {
             fNames.fShared[e.fNode] = "E" + std::to_string(shared++);
-        } else if (e.fMember == 0) {
+        } else if (numbered.insert(e.fGroup).second) {
             fNames.fGroups[e.fGroup].first = groups++;
         }
     }

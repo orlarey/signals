@@ -164,8 +164,8 @@ class ppsigNames {
 };
 
 // A signal printed as equations : the recursions and the shared subexpressions are named
-// and defined once, before their uses (except within a recursion), and the outputs are
-// printed last. The members of a recursive group are defined on consecutive lines. Names
+// and defined once, before their uses (except the uses through a delay), and the outputs
+// are printed last. The members of a recursive group are defined on consecutive lines. Names
 // are numbered in the order of a depth-first traversal from the outputs, left to right, so
 // the text depends only on the signal. When all is set, every compound subexpression is
 // named, not only the shared ones.
@@ -201,7 +201,11 @@ class ppsigEquations {
     bool        isNamed(Tree t) const;
     std::string nameOf(Tree t);
     void        define(Tree t);
-    void defineGroup(Tree group);
+    void        defineGroup(Tree group);
+    void        instantDeps(Tree t, const std::map<Tree, int>& index,
+                            const std::map<Tree, int>& firstMember, std::set<Tree>& seen,
+                            std::set<int>& deps) const;
+    void        order();
     std::string expand(Tree t) const;
 };
 
