@@ -367,6 +367,14 @@ class Evaluator {
             }
             return s;
         }
+        if (isSigIRM(t, x, y)) {  // IRM(x; c) : y = mix(c, x, y(n-1)), interpolated as a mix
+            const T c = r(at(y, n)), a = r(at(x, n)), b = r(n < 1 ? 0 : at(t, n - 1));
+            if (itv::mixFromB(getCertifiedSigType(y)->getInterval())) {
+                const T w = T(1) - c;
+                return fRun.fma ? std::fma(w, a - b, b) : b + w * (a - b);
+            }
+            return fRun.fma ? std::fma(c, b - a, a) : a + c * (b - a);
+        }
         if (isSigIIR(t, subs)) {  // IIR[x, c1, ...] : y = x + sum_k c_k y(n-k), k >= 1
             T s = r(at(subs[0], n));
             for (size_t k = 1; k < subs.size(); k++) {
@@ -1048,6 +1056,38 @@ static void negations()
 
 // the interpolation A + c * (B - A), the state of a TPT one-pole filter s' = s + 2g (x - s) :
 // A read twice, the sum rule forgets it, the rule of mix bounds it between A and B
+// IRM(x; c), the infinite recursive mix y = mix(c, x, y') : bounded by an invariant of
+// the mix, the hull of x and 0 with a margin or the power-of-two envelope
+static void irms()
+{
+    section("the infinite recursive mix");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        Tree pole = slider("irmpole" + p, 0.999, 0.99, 0.9999);
+        Tree far  = slider("irmtarget" + p, 48000, 0, 384000);
+        Tree slow = sigIRM(far, pole);
+        Tree in   = sigMax(sigReal(-1), sigMin(sigReal(1), sigInput(0)));
+        Tree any  = slider("irmany" + p, 0.5, 0, 1);
+        Tree free = sigIRM(in, any);
+        Tree inv  = sigDiv(one(), sigAdd(sigReal(1.5), free));
+        Tree o    = outs({slow, free, inv});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        check(itvOf(slow).isValid() && itvOf(slow).lo() == 0 && itvOf(slow).hi() >= 384000 &&
+                  itvOf(slow).hi() < 384000 * 1.01,
+              "precision : a slow smoother of [0, 384000] within 1 % of its target" + p);
+        check(itvOf(free).isValid() && itvOf(free).lo() >= -1 && itvOf(free).hi() <= 1,
+              "precision : a smoother of [-1, 1], its pole in [0, 1], stays in [-1, 1]" + p);
+        check(itvOf(inv).isBounded() && itvOf(inv).isValid(), "validity : 1 / (1.5 + smoother) is bounded" + p);
+        check(getCertifiedSigType(slow)->variability() == kSamp && getCertifiedSigType(slow)->nature() == kReal,
+              "type : a smoother of slow values is a real of the sample" + p);
+        std::stringstream ss;
+        ss << ppsig(slow);
+        check(ss.str().rfind("IRM(", 0) == 0, "printing : " + ss.str().substr(0, 40));
+        inclusion("irm", o, precision);
+    }
+}
+
 static void interpolations()
 {
     section("the interpolation A + c * (B - A)");
@@ -1190,6 +1230,7 @@ int main()
     negations();
     products();
     interpolations();
+    irms();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
