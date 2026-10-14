@@ -367,6 +367,13 @@ class Evaluator {
             }
             return s;
         }
+        if (tvec bt, br; isSigBpf(t, x, bt, br)) {  // Bpf(x; t; r) : the chain of comparisons
+            const T v = r(at(x, n));
+            for (size_t k = 0; k < bt.size(); k++) {
+                if (v < r(at(bt[k], n))) return at(br[k], n);
+            }
+            return at(br.back(), n);
+        }
         if (isSigIRM(t, x, y)) {  // IRM(x; c) : y = mix(c, x, y(n-1)), interpolated as a mix
             const T c = r(at(y, n)), a = r(at(x, n)), b = r(n < 1 ? 0 : at(t, n - 1));
             if (itv::mixFromB(getCertifiedSigType(y)->getInterval())) {
@@ -1088,6 +1095,37 @@ static void irms()
     }
 }
 
+// Bpf(x; t; r), the break-point function of ba.bpf : each region bounded with x
+// restricted to its range
+static void bpfs()
+{
+    section("the break-point function");
+    for (int precision : {1, 2}) {
+        const std::string p = precision == 1 ? " (float)" : " (double)";
+        Tree x  = slider("bpfx" + p, 15, -5, 40);
+        // start(0, 0) : point(10, 5) : point(20, -3) : end(30, 1)
+        Tree s1 = sigMul(sigReal(0.5), x);
+        Tree s2 = sigAdd(sigReal(5), sigMul(sigReal(-0.8), sigSub(x, sigReal(10))));
+        Tree s3 = sigAdd(sigReal(-3), sigMul(sigReal(0.4), sigSub(x, sigReal(20))));
+        Tree f  = sigBpf(x, {sigReal(0), sigReal(10), sigReal(20), sigReal(30)}, {sigReal(0), s1, s2, s3, sigReal(1)});
+        Tree xs = slider("bpfxs" + p, 12, 11, 14);
+        Tree g  = sigBpf(xs, {sigReal(0), sigReal(10), sigReal(20), sigReal(30)}, {sigReal(0), sigMul(sigReal(0.5), xs),
+                  sigAdd(sigReal(5), sigMul(sigReal(-0.8), sigSub(xs, sigReal(10)))),
+                  sigAdd(sigReal(-3), sigMul(sigReal(0.4), sigSub(xs, sigReal(20)))), sigReal(1)});
+        Tree o = outs({f, g});
+        itv::programPrecision() = precision;
+        typeAnnotation(o, false);
+        check(itvOf(f).isValid() && itvOf(f).lo() >= -3.001 && itvOf(f).hi() <= 5.001,
+              "precision : a break-point function stays within its points, [-3, 5]" + p);
+        check(itvOf(g).lo() >= 1.79 && itvOf(g).lo() <= 1.81 && itvOf(g).hi() >= 4.19 && itvOf(g).hi() <= 4.21,
+              "precision : x in [11, 14] reads one segment, [1.8, 4.2]" + p);
+        std::stringstream ss;
+        ss << ppsig(f);
+        check(ss.str().rfind("Bpf(", 0) == 0, "printing : " + ss.str().substr(0, 40));
+        inclusion("bpf", o, precision);
+    }
+}
+
 static void interpolations()
 {
     section("the interpolation A + c * (B - A)");
@@ -1231,6 +1269,7 @@ int main()
     products();
     interpolations();
     irms();
+    bpfs();
     invalidities();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
