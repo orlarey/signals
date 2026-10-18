@@ -22,6 +22,7 @@
 #ifndef _SigType_
 #define _SigType_
 
+#include <climits>
 #include <iostream>
 #include <vector>
 #include "garbageable.hh"
@@ -85,6 +86,16 @@ enum Vectorability {
 class AudioType;
 
 typedef P<AudioType>             Type;
+
+// A typing may defer the intervals (typeAnnotation without intervals) : its types carry
+// this mark instead, an lsb no interval has, and their interval is read through
+// sigInterval, which computes it on demand. Reading the mark is an error.
+inline constexpr int kDeferredIntervalLSB = INT_MAX - 1;
+inline itv::interval deferredInterval()
+{
+    return itv::interval(0.0, 0.0, kDeferredIntervalLSB);
+}
+[[noreturn]] void deferredIntervalRead();
 typedef const std::vector<Type>& ConstTypes;
 
 /**
@@ -103,7 +114,6 @@ class AudioType : public virtual Garbageable {
     int           fBoolean;        ///< When a signal stands for a boolean value
     itv::interval fInterval;       ///< Minimal and maximal values the signal can take
     res           fRes;            ///< Resolution (fixed-point)
-    Tree          fCode;           ///< Tree representation (for memoization purposes)
 
    public:
     AudioType(int n, int v, int c, int vec = kVect, int b = kNum, itv::interval i = interval(),
@@ -130,13 +140,14 @@ class AudioType : public virtual Garbageable {
 
     interval getInterval() const
     {
+        if (fInterval.lsb() == kDeferredIntervalLSB) deferredIntervalRead();
         return fInterval;
     }  ///< returns the interval (min and max values) of a signal
+    bool hasDeferredInterval() const { return fInterval.lsb() == kDeferredIntervalLSB; }
+    const interval& rawInterval() const { return fInterval; }  ///< deferred mark included
     void setInterval(const interval& r) { fInterval = r; }
     res  getRes() const { return fRes; }  ///< returns the resolution of the signal (fixed)
 
-    void setCode(Tree code) { fCode = code; }  ///< sets the memoized code of a signal
-    Tree getCode() { return fCode; }           ///< returns the memoized code of a signal
 
     virtual AudioType* promoteNature(int n)        = 0;  ///< promote the nature of a type
     virtual AudioType* promoteVariability(int n)   = 0;  ///< promote the variability of a type
@@ -354,6 +365,5 @@ inline constexpr const char* kIntervalRefusalHint =
 //--------------------------------------------------
 // Type conversion
 
-Tree codeAudioType(AudioType* t);  ///< Code an audio type as a tree (memoization)
 
 #endif
