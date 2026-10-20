@@ -47,6 +47,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "mixForm.hh"
 #include "binop.hh"
 #include "ppsig.hh"
 #include "sigs-config.hh"
@@ -335,8 +336,14 @@ class Evaluator {
             return v / (v + T(1));
         }
         if (isSigMix(t, x, y, z)) {
-            // the program interpolates from the operand whose weight may be near 1
-            const T c = r(at(x, n)), a = r(at(y, n)), b = r(at(z, n));
+            // the program interpolates from the operand whose weight may be near 1, from the
+            // weight w of the complement c = 1 - w itself when there is one (mixForm.hh)
+            const T a = r(at(y, n)), b = r(at(z, n));
+            if (Tree w; mixFromWeight(x, getCertifiedSigType(x)->getInterval(), w)) {
+                const T tw = r(at(w, n));
+                return fRun.fma ? std::fma(tw, a - b, b) : b + tw * (a - b);
+            }
+            const T c = r(at(x, n));
             if (itv::mixFromB(getCertifiedSigType(x)->getInterval())) {
                 const T w = T(1) - c;
                 return fRun.fma ? std::fma(w, a - b, b) : b + w * (a - b);
@@ -639,6 +646,18 @@ static void mixes()
         check(itvOf(inverse).isBounded() && itvOf(inverse).isValid(),
               "validity : the reciprocal of a positive smoother is bounded" + p);
         inclusion("convex mixes", o, precision);
+
+        // a weight written 1 - t, t tiny : in single precision 1 - t is 1, and 1 - c would
+        // lose t ; the program computes b + t (a - b) from t itself (mixForm.hh), and the
+        // interval of the node bounds that computation (MixOfComplement)
+        Tree tw = slider("tiny" + p, 1.5e-8, 1e-8, 2e-8);
+        Tree ma = slider("ma" + p, 0.95, 0.9, 1);
+        Tree mb = slider("mb" + p, 0.0015, 0.001, 0.002);
+        Tree cm = sigMix(sigSum({one(), sigNeg(tw)}), ma, mb);
+        Tree o2 = outs({cm});
+        itv::programPrecision() = precision;
+        typeAnnotation(o2, false);
+        inclusion("a mix weighted by a complement", o2, precision);
     }
 }
 
