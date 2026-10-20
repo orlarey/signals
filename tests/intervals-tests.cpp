@@ -751,6 +751,23 @@ static void rotations()
             check(sigs::g.gCertifiedSamples.empty(), "certificate : none in double precision" + p);
         }
         inclusion("rotation", o, precision, 4096);
+
+        // y gets one more term, which reads y again two samples ago : not an input of the
+        // rotation but part of the recursion, so the rotation alone does not bound the
+        // radius (here the oscillator diverges within a few thousand samples)
+        Tree id2 = tree(unique("rotfb"));
+        Tree x2 = late(sigProj(0, ref(id2))), y2 = late(sigProj(1, ref(id2)));
+        Tree y22 = late(sigProj(1, ref(id2)), 2);
+        Tree fb  = sigMul(sigReal(-0.5), sigMax(sigReal(0), sigSub(sigSub(sigReal(0), y22), sigReal(0.5))));
+        Tree bx2 = sigAdd(sigMul(y2, s), sigMul(x2, c));
+        Tree by2 = sigAdd(sigAdd(sigAdd(sigMul(y2, c), sigMul(x2, sigSub(sigInt(0), s))), impulse()), fb);
+        Tree grp2 = rec(id2, list2(bx2, by2));
+        Tree xf = sigProj(0, grp2), yf = sigProj(1, grp2);
+        Tree o3 = outs({xf, yf});
+        itv::programPrecision() = precision;
+        typeAnnotation(o3, false);
+        check(!itvOf(xf).isBounded() && !itvOf(yf).isBounded(),
+              "soundness : a term that reads the oscillator is not an input of the rotation" + p);
     }
 }
 
