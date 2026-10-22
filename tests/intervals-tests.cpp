@@ -1245,6 +1245,29 @@ static void invalidities()
     }
 }
 
+static void wraps()
+{
+    section("wrap");
+    // y = 1 + y@1, the integer time counter : it leaves the int32 range one day
+    Tree counter = rec1("wcount", [&](Tree y) { return sigAdd(sigInt(1), y); });
+    // y = 12345 + 1103515245 y@1, an integer recursion with a gain
+    Tree lcg = rec1("wlcg", [&](Tree y) { return sigAdd(sigInt(12345), sigMul(sigInt(1103515245), y)); });
+    // y = 0.5 + y@1, a float accumulator
+    Tree facc = rec1("wfacc", [&](Tree y) { return sigAdd(sigReal(0.5), y); });
+    // the same as IIR nodes : IIR[1, 1], IIR[12345, 1103515245], IIR[0.5, 1.0]
+    Tree icount = sigIIR({sigInt(1), sigInt(1)});
+    Tree ilcg   = sigIIR({sigInt(12345), sigInt(1103515245)});
+    Tree ifacc  = sigIIR({sigReal(0.5), sigReal(1.0)});
+    itv::programPrecision() = 2;
+    typeAnnotation(outs({counter, lcg, facc, icount, ilcg, ifacc}), false);
+    check(itvOf(counter).mayOverflow(), "wrap : the integer time counter may wrap");
+    check(itvOf(lcg).mayOverflow(), "wrap : an integer recursion with a gain may wrap");
+    check(!itvOf(facc).mayOverflow(), "wrap : a float accumulator does not wrap");
+    check(itvOf(icount).mayOverflow(), "wrap : the integer accumulator IIR may wrap");
+    check(itvOf(ilcg).mayOverflow(), "wrap : an integer IIR with a gain may wrap");
+    check(!itvOf(ifacc).mayOverflow(), "wrap : a float accumulator IIR does not wrap");
+}
+
 static void costs()
 {
     section("cost");
@@ -1307,6 +1330,7 @@ int main()
     irms();
     bpfs();
     invalidities();
+    wraps();
     costs();
     std::cout << (gFailed ? "FAILED" : "PASSED") << " (" << gFailed << " failure(s))" << std::endl;
     return gFailed ? 1 : 0;
