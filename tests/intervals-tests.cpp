@@ -1266,6 +1266,11 @@ static void wraps()
     check(itvOf(icount).mayOverflow(), "wrap : the integer accumulator IIR may wrap");
     check(itvOf(ilcg).mayOverflow(), "wrap : an integer IIR with a gain may wrap");
     check(!itvOf(ifacc).mayOverflow(), "wrap : a float accumulator IIR does not wrap");
+    // the motion of the bounds : a float accumulator only rises, a fixed sine does not move
+    Tree sine = sigSin(sigReal(1.0));
+    typeAnnotation(outs({facc, sine}), false);
+    check(!itvOf(facc).loMoves() && itvOf(facc).hiMoves(), "motion : a float accumulator only rises past the horizon");
+    check(!itvOf(sine).moves(), "motion : a constant does not move");
 }
 
 static void costs()
