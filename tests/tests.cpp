@@ -235,6 +235,12 @@ static void checkNatureFixpoint()
         int  pi;
         TLIB_ASSERT(isProj(recM, pi, X));
         check(solver.recType(X, 0) == solver.type(recM), "facade: recType is type of proj");
+        // the equality of types sees the lsb and the flags of the interval
+        const Type a = makeSimpleType(kInt, kKonst, kComp, kVect, kNum, interval(0, 1, 0));
+        const Type b = makeSimpleType(kInt, kKonst, kComp, kVect, kNum, interval(0, 1, 0).withOverflow(true));
+        const Type c = makeSimpleType(kInt, kKonst, kComp, kVect, kNum, interval(0, 1, 2));
+        const Type d = makeSimpleType(kInt, kKonst, kComp, kVect, kNum, interval(0, 1, 0));
+        check(a == d && a != b && a != c, "types: equality sees the lsb and the flags");
         bool caught = false;
         try {
             solver.type(outs);  // the top-level LIST is structure, not a signal
